@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   Clock4,
   Columns3,
@@ -21,16 +21,6 @@ import type { TreeSortMode } from "./lib/treeTransform";
 import { shouldRefreshTreeImmediately } from "./lib/treeRefresh";
 import { usePublishedPagesStore } from "./stores/publishedPagesStore";
 import { KiwiPage } from "./components/KiwiPage";
-import { KiwiEditor } from "./components/KiwiEditor";
-import { KiwiSearch } from "./components/KiwiSearch";
-import { KiwiGraph } from "./components/KiwiGraph";
-import { KiwiHistory } from "./components/KiwiHistory";
-import { KiwiData } from "./components/KiwiData";
-import { KiwiBases } from "./components/KiwiBases";
-import { KiwiCanvasScreen } from "./components/KiwiCanvasScreen";
-import { KiwiWhiteboardScreen } from "./components/KiwiWhiteboardScreen";
-import { KiwiTimeline } from "./components/KiwiTimeline";
-import { KiwiKanban } from "./components/KiwiKanban";
 import { KiwiRecentStart } from "./components/KiwiRecentStart";
 import { KanbanDragProvider } from "./components/kanban/KanbanDragProvider";
 import { NewPageDialog } from "./components/NewPageDialog";
@@ -64,6 +54,25 @@ import { useTheme } from "./hooks/useTheme";
 import { isMarkdown, isCanvasFile, isExcalidrawFile } from "./lib/paths";
 import { type TreeRevealRequest } from "./lib/treeReveal";
 import { HostToolbarActions } from "./components/HostToolbarActions";
+
+const KiwiEditor = lazy(() => import("./components/KiwiEditor").then((module) => ({ default: module.KiwiEditor })));
+const KiwiSearch = lazy(() => import("./components/KiwiSearch").then((module) => ({ default: module.KiwiSearch })));
+const KiwiGraph = lazy(() => import("./components/KiwiGraph").then((module) => ({ default: module.KiwiGraph })));
+const KiwiHistory = lazy(() => import("./components/KiwiHistory").then((module) => ({ default: module.KiwiHistory })));
+const KiwiData = lazy(() => import("./components/KiwiData").then((module) => ({ default: module.KiwiData })));
+const KiwiBases = lazy(() => import("./components/KiwiBases").then((module) => ({ default: module.KiwiBases })));
+const KiwiCanvasScreen = lazy(() => import("./components/KiwiCanvasScreen").then((module) => ({ default: module.KiwiCanvasScreen })));
+const KiwiWhiteboardScreen = lazy(() => import("./components/KiwiWhiteboardScreen").then((module) => ({ default: module.KiwiWhiteboardScreen })));
+const KiwiTimeline = lazy(() => import("./components/KiwiTimeline").then((module) => ({ default: module.KiwiTimeline })));
+const KiwiKanban = lazy(() => import("./components/KiwiKanban").then((module) => ({ default: module.KiwiKanban })));
+
+function ViewLoading() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+    </div>
+  );
+}
 
 function getInitialActivePath(): string | null {
   if (typeof window === "undefined") return null;
@@ -294,8 +303,10 @@ export default function App() {
   }, [refreshKey]);
 
   useEffect(() => {
-    void refreshPublishedPages();
-  }, [refreshKey, spaceKey, refreshPublishedPages]);
+    if (!tree) return;
+    const timer = window.setTimeout(() => void refreshPublishedPages(), 1_500);
+    return () => window.clearTimeout(timer);
+  }, [tree, spaceKey, refreshPublishedPages]);
 
   useEffect(() => {
     if (!tree || !uiConfigLoaded || activePath) return;
@@ -754,6 +765,7 @@ const handleSpaceSwitch = useCallback(() => {
           {/* Sidebar */}
           <AppSidebar
             activePath={activePath}
+            treeRoot={tree}
             isMobile={isMobile}
             sidebarOpen={sidebarOpen}
             sidebarWidth={sidebarWidth}
@@ -811,6 +823,7 @@ const handleSpaceSwitch = useCallback(() => {
 
           {/* Main content area */}
           <main className={`flex-1 relative ${basesOpen || canvasOpen || whiteboardOpen || timelineOpen || kanbanOpen || dataOpen || graphOpen ? "overflow-hidden" : "overflow-auto kiwi-scroll"}`}>
+            <Suspense fallback={<ViewLoading />}>
             {basesOpen ? (
               <KiwiBases
                 onClose={() => setBasesOpen(false)}
@@ -933,22 +946,27 @@ const handleSpaceSwitch = useCallback(() => {
                 <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
               </div>
             )}
+            </Suspense>
           </main>
         </div>
         </div>
       </KanbanDragProvider>
 
       {/* Modals */}
-      <KiwiSearch
-        open={searchOpen}
-        onOpenChange={(open) => {
-          setSearchOpen(open);
-          if (!open) setSearchQuery(undefined);
-        }}
-        onSelect={(p) => navigate(p)}
-        tree={tree}
-        initialQuery={searchQuery}
-      />
+      {searchOpen && (
+        <Suspense fallback={null}>
+          <KiwiSearch
+            open={searchOpen}
+            onOpenChange={(open) => {
+              setSearchOpen(open);
+              if (!open) setSearchQuery(undefined);
+            }}
+            onSelect={(p) => navigate(p)}
+            tree={tree}
+            initialQuery={searchQuery}
+          />
+        </Suspense>
+      )}
       <NewPageDialog
         open={newOpen}
         onOpenChange={setNewOpen}

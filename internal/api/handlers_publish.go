@@ -399,48 +399,29 @@ func (h *Handlers) PublishStatus(c echo.Context) error {
 //	@Router			/api/kiwi/publish/list [get]
 func (h *Handlers) PublishedPages(c echo.Context) error {
 	ctx := c.Request().Context()
-	tree, err := storage.BuildTree(ctx, h.store, "/", maxTreeDepth)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-
 	pages := make([]publishedPage, 0)
-	var walk func(entries []*storage.TreeEntry) error
-	walk = func(entries []*storage.TreeEntry) error {
-		for _, entry := range entries {
-			if entry == nil {
-				continue
-			}
-			if entry.IsDir {
-				if err := walk(entry.Children); err != nil {
-					return err
-				}
-				continue
-			}
-			lower := strings.ToLower(entry.Path)
-			if !strings.HasSuffix(lower, ".md") && !strings.HasSuffix(lower, ".markdown") {
-				continue
-			}
-			content, err := readFileOr404(ctx, h.store, entry.Path)
-			if err != nil {
-				return err
-			}
-			if !rbac.PagePublished(content) {
-				continue
-			}
-			page := publishedPage{
-				Path:      entry.Path,
-				PublicURL: "/p/" + entry.Path,
-			}
-			if publishedAt := rbac.PagePublishedAt(content); publishedAt != nil {
-				page.PublishedAt = publishedAt.Format(time.RFC3339)
-			}
-			pages = append(pages, page)
+	err := storage.WalkFilter(ctx, h.store, "/", func(entry storage.Entry) bool {
+		lower := strings.ToLower(entry.Name)
+		return strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown")
+	}, func(entry storage.Entry) error {
+		content, err := readFileOr404(ctx, h.store, entry.Path)
+		if err != nil {
+			return err
 		}
+		if !rbac.PagePublished(content) {
+			return nil
+		}
+		page := publishedPage{
+			Path:      entry.Path,
+			PublicURL: "/p/" + entry.Path,
+		}
+		if publishedAt := rbac.PagePublishedAt(content); publishedAt != nil {
+			page.PublishedAt = publishedAt.Format(time.RFC3339)
+		}
+		pages = append(pages, page)
 		return nil
-	}
-
-	if err := walk(tree.Children); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 

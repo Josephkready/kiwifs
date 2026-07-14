@@ -22,12 +22,26 @@ type frontmatterErrorReader interface {
 	ReadFrontmatterError(ctx context.Context, path string) (string, error)
 }
 
+// TreeOptions controls optional work performed while constructing a tree.
+type TreeOptions struct {
+	IncludeFrontmatterErrors bool
+}
+
 // BuildTree creates the recursive API tree and attaches order metadata.
 //
 // Directory order is read from the tree sidecar metadata; markdown order is
 // read from frontmatter. Markdown parse errors are carried on the row so the UI
 // can warn users without dropping files that lack valid frontmatter.
 func BuildTree(ctx context.Context, store Storage, path string, depth int) (*TreeEntry, error) {
+	return BuildTreeWithOptions(ctx, store, path, depth, TreeOptions{IncludeFrontmatterErrors: true})
+}
+
+// BuildTreeWithOptions creates a recursive tree while allowing API callers to
+// skip diagnostics they do not return to clients.
+func BuildTreeWithOptions(ctx context.Context, store Storage, path string, depth int, options TreeOptions) (*TreeEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	entries, err := store.List(ctx, path)
 	if err != nil {
 		return nil, err
@@ -40,7 +54,13 @@ func BuildTree(ctx context.Context, store Storage, path string, depth int) (*Tre
 	}
 
 	for _, entry := range entries {
-		child := buildTreeChild(ctx, store, entry, depth)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		child, err := buildTreeChild(ctx, store, entry, depth, options)
+		if err != nil {
+			return nil, err
+		}
 		root.Children = append(root.Children, child)
 	}
 	sortTreeChildren(root.Children)
@@ -57,7 +77,7 @@ func treeDisplayName(path string) string {
 }
 
 // buildTreeChild maps one storage entry to the public tree row shape.
-func buildTreeChild(ctx context.Context, store Storage, entry Entry, depth int) *TreeEntry {
+func buildTreeChild(ctx context.Context, store Storage, entry Entry, depth int, options TreeOptions) (*TreeEntry, error) {
 	child := &TreeEntry{
 		Path:  entry.Path,
 		Name:  entry.Name,
@@ -65,9 +85,13 @@ func buildTreeChild(ctx context.Context, store Storage, entry Entry, depth int) 
 		Size:  entry.Size,
 	}
 
-	applyFrontmatterError(ctx, store, child)
-	applyTreeChildren(ctx, store, child, depth)
-	return child
+	if options.IncludeFrontmatterErrors {
+		applyFrontmatterError(ctx, store, child)
+	}
+	if err := applyTreeChildren(ctx, store, child, depth, options); err != nil {
+		return nil, err
+	}
+	return child, nil
 }
 
 // applyFrontmatterError attaches parse errors so the UI can warn about broken frontmatter.
@@ -82,18 +106,22 @@ func applyFrontmatterError(ctx context.Context, store Storage, child *TreeEntry)
 }
 
 // applyTreeChildren recursively loads child rows for expandable directories.
-func applyTreeChildren(ctx context.Context, store Storage, child *TreeEntry, depth int) {
+func applyTreeChildren(ctx context.Context, store Storage, child *TreeEntry, depth int, options TreeOptions) error {
 	if !child.IsDir {
-		return
+		return nil
 	}
 	if depth <= 0 {
-		return
+		return nil
 	}
-	sub, err := BuildTree(ctx, store, child.Path, depth-1)
+	sub, err := BuildTreeWithOptions(ctx, store, child.Path, depth-1, options)
 	if err != nil {
-		return
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return nil
 	}
 	child.Children = sub.Children
+	return nil
 }
 
 // sortTreeChildren sorts entries using natural (human/version) sort order
