@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -12,6 +13,21 @@ import (
 type frontmatterOnlyStore struct {
 	readCalls            int
 	readFrontmatterCalls int
+}
+
+type nestedFrontmatterStore struct {
+	frontmatterOnlyStore
+}
+
+func (s *nestedFrontmatterStore) List(_ context.Context, path string) ([]Entry, error) {
+	switch strings.Trim(path, "/") {
+	case "":
+		return []Entry{{Path: "nested", Name: "nested", IsDir: true}}, nil
+	case "nested":
+		return []Entry{{Path: "nested/page.md", Name: "page.md", Size: 1024}}, nil
+	default:
+		return nil, nil
+	}
 }
 
 func (s *frontmatterOnlyStore) Read(context.Context, string) ([]byte, error) {
@@ -24,6 +40,11 @@ func (s *frontmatterOnlyStore) Delete(context.Context, string) error         { r
 func (s *frontmatterOnlyStore) Stat(context.Context, string) (*Entry, error) { return nil, nil }
 func (s *frontmatterOnlyStore) Exists(context.Context, string) bool          { return false }
 func (s *frontmatterOnlyStore) AbsPath(path string) string                   { return path }
+
+func (s *frontmatterOnlyStore) ReadFrontmatterError(context.Context, string) (string, error) {
+	s.readFrontmatterCalls++
+	return "broken frontmatter", nil
+}
 
 func (s *frontmatterOnlyStore) List(context.Context, string) ([]Entry, error) {
 	return []Entry{
@@ -40,6 +61,36 @@ func TestBuildTreeSortsAlphabetically(t *testing.T) {
 	}
 	if got, want := tree.Children[0].Name, "a.md"; got != want {
 		t.Fatalf("first child = %s, want %s (natural sort)", got, want)
+	}
+}
+
+func TestBuildTreeWithOptionsSkipsFrontmatterDiagnostics(t *testing.T) {
+	store := &nestedFrontmatterStore{}
+	tree, err := BuildTreeWithOptions(
+		context.Background(),
+		store,
+		"/",
+		1,
+		TreeOptions{IncludeFrontmatterErrors: false},
+	)
+	if err != nil {
+		t.Fatalf("build tree: %v", err)
+	}
+	if store.readFrontmatterCalls != 0 {
+		t.Fatalf("frontmatter diagnostic reads = %d, want 0", store.readFrontmatterCalls)
+	}
+	if got := tree.Children[0].Children[0].FrontmatterError; got != "" {
+		t.Fatalf("frontmatter error = %q, want empty", got)
+	}
+}
+
+func TestBuildTreeWithOptionsStopsWhenContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := BuildTreeWithOptions(ctx, &frontmatterOnlyStore{}, "/", 0, TreeOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
 

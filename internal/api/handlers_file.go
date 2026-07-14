@@ -56,7 +56,13 @@ func (h *Handlers) Tree(c echo.Context) error {
 	if path == "" {
 		path = "/"
 	}
-	st, err := storage.BuildTree(c.Request().Context(), h.store, path, maxTreeDepth)
+	st, err := storage.BuildTreeWithOptions(
+		c.Request().Context(),
+		h.store,
+		path,
+		maxTreeDepth,
+		storage.TreeOptions{IncludeFrontmatterErrors: false},
+	)
 	if err != nil {
 		if errors.Is(err, storage.ErrPathDenied) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -209,7 +215,6 @@ func pageViewSource(c echo.Context) string {
 	}
 	return source
 }
-
 
 type patchFrontmatterRequest struct {
 	Fields map[string]any `json:"fields"`

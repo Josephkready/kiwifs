@@ -25,16 +25,16 @@ import { usePublishedPagesStore } from "../stores/publishedPagesStore";
 import {
   collectSectionPrefixes,
   filterPathsByQuery,
-  isStructuredSidebar,
   mergeSidebarExcludePatterns,
   type SidebarConfig,
 } from "../lib/sidebarStructure";
-import { api, type TreeEntry } from "../lib/api";
+import type { TreeEntry } from "../lib/api";
 
 type RecentPage = { path: string };
 
 type AppSidebarProps = {
   activePath: string | null;
+  treeRoot: TreeEntry | null | undefined;
   isMobile: boolean;
   sidebarOpen: boolean;
   sidebarWidth: number;
@@ -63,6 +63,7 @@ type AppSidebarProps = {
 
 export function AppSidebar({
   activePath,
+  treeRoot,
   isMobile,
   sidebarOpen,
   sidebarWidth,
@@ -105,22 +106,6 @@ export function AppSidebar({
     () => mergeSidebarExcludePatterns(sidebarConfig.hidden),
     [sidebarConfig.hidden],
   );
-  const usesStructuredSidebar = isStructuredSidebar(sidebarConfig);
-  const [sharedTreeRoot, setSharedTreeRoot] = useState<TreeEntry | null>(null);
-
-  useEffect(() => {
-    if (!usesStructuredSidebar) {
-      setSharedTreeRoot(null);
-      return;
-    }
-    let cancelled = false;
-    api.tree("/").then((tree) => {
-      if (!cancelled) setSharedTreeRoot(tree);
-    }).catch(() => {
-      if (!cancelled) setSharedTreeRoot(null);
-    });
-    return () => { cancelled = true; };
-  }, [refreshKey, usesStructuredSidebar]);
 
   const hasShortcutSections = configPinned.length > 0
     || starred.length > 0
@@ -254,7 +239,7 @@ export function AppSidebar({
                     enableFileNesting
                     excludePatterns={treeExcludePatterns}
                     includePrefixes={section.paths}
-                    treeRoot={usesStructuredSidebar ? sharedTreeRoot : undefined}
+                    treeRoot={treeRoot}
                     autoReveal={false}
                     onCreateChild={onCreatePage}
                     onDeleted={() => {
@@ -339,7 +324,7 @@ export function AppSidebar({
               excludePatterns={treeExcludePatterns}
               excludePrefixes={sectionPrefixes}
               excludePaths={sidebarConfig.pinned}
-              treeRoot={usesStructuredSidebar ? sharedTreeRoot : undefined}
+              treeRoot={treeRoot}
               onCreateChild={onCreatePage}
               onDeleted={() => {
                 onActivePathChange(null);
