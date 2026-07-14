@@ -55,6 +55,8 @@ import { isMarkdown, isCanvasFile, isExcalidrawFile } from "./lib/paths";
 import { type TreeRevealRequest } from "./lib/treeReveal";
 import { HostToolbarActions } from "./components/HostToolbarActions";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { OptionalContent } from "./components/OptionalContent";
+import { schedulePublishedPagesRefresh } from "./lib/publishedPageRefresh";
 
 const KiwiEditor = lazy(() => import("./components/KiwiEditor").then((module) => ({ default: module.KiwiEditor })));
 const KiwiSearch = lazy(() => import("./components/KiwiSearch").then((module) => ({ default: module.KiwiSearch })));
@@ -322,12 +324,10 @@ export default function App() {
   }, [refreshKey, spaceKey]);
 
   useEffect(() => {
-    if (treeLoading) return;
-    const timer = window.setTimeout(
+    return schedulePublishedPagesRefresh(
+      { loading: treeLoading, hasTree: Boolean(tree) },
       () => void refreshPublishedPages(),
-      tree ? 1_500 : 0,
     );
-    return () => window.clearTimeout(timer);
   }, [tree, treeLoading, spaceKey, refreshPublishedPages]);
 
   useEffect(() => {
@@ -977,7 +977,7 @@ const handleSpaceSwitch = useCallback(() => {
       </KanbanDragProvider>
 
       {/* Modals */}
-      {searchOpen && (
+      <OptionalContent when={searchOpen}>
         <ErrorBoundary fallback={<ViewLoadError />}>
           <Suspense fallback={null}>
             <KiwiSearch
@@ -992,7 +992,7 @@ const handleSpaceSwitch = useCallback(() => {
             />
           </Suspense>
         </ErrorBoundary>
-      )}
+      </OptionalContent>
       <NewPageDialog
         open={newOpen}
         onOpenChange={setNewOpen}
