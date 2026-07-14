@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -12,6 +13,21 @@ import (
 type frontmatterOnlyStore struct {
 	readCalls            int
 	readFrontmatterCalls int
+}
+
+type nestedFrontmatterStore struct {
+	frontmatterOnlyStore
+}
+
+func (s *nestedFrontmatterStore) List(_ context.Context, path string) ([]Entry, error) {
+	switch strings.Trim(path, "/") {
+	case "":
+		return []Entry{{Path: "nested", Name: "nested", IsDir: true}}, nil
+	case "nested":
+		return []Entry{{Path: "nested/page.md", Name: "page.md", Size: 1024}}, nil
+	default:
+		return nil, nil
+	}
 }
 
 func (s *frontmatterOnlyStore) Read(context.Context, string) ([]byte, error) {
@@ -49,12 +65,12 @@ func TestBuildTreeSortsAlphabetically(t *testing.T) {
 }
 
 func TestBuildTreeWithOptionsSkipsFrontmatterDiagnostics(t *testing.T) {
-	store := &frontmatterOnlyStore{}
+	store := &nestedFrontmatterStore{}
 	tree, err := BuildTreeWithOptions(
 		context.Background(),
 		store,
 		"/",
-		0,
+		1,
 		TreeOptions{IncludeFrontmatterErrors: false},
 	)
 	if err != nil {
@@ -63,7 +79,7 @@ func TestBuildTreeWithOptionsSkipsFrontmatterDiagnostics(t *testing.T) {
 	if store.readFrontmatterCalls != 0 {
 		t.Fatalf("frontmatter diagnostic reads = %d, want 0", store.readFrontmatterCalls)
 	}
-	if got := tree.Children[0].FrontmatterError; got != "" {
+	if got := tree.Children[0].Children[0].FrontmatterError; got != "" {
 		t.Fatalf("frontmatter error = %q, want empty", got)
 	}
 }

@@ -93,6 +93,6 @@ describe("sidebarStructure", () => {
     const config = { pinned: ["index.md"], hidden: [], sections: [] };
     expect(isStructuredSidebar(config)).toBe(true);
     expect(filterPathsByQuery(config.pinned, "nomatch")).toEqual([]);
-    // AppSidebar gates structured mode on unfiltered config — not filterPathsByQuery output.
+    // Structured config remains active even when a client-side filter hides its shortcuts.
   });
 });

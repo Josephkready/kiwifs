@@ -54,6 +54,7 @@ import { useTheme } from "./hooks/useTheme";
 import { isMarkdown, isCanvasFile, isExcalidrawFile } from "./lib/paths";
 import { type TreeRevealRequest } from "./lib/treeReveal";
 import { HostToolbarActions } from "./components/HostToolbarActions";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const KiwiEditor = lazy(() => import("./components/KiwiEditor").then((module) => ({ default: module.KiwiEditor })));
 const KiwiSearch = lazy(() => import("./components/KiwiSearch").then((module) => ({ default: module.KiwiSearch })));
@@ -70,6 +71,15 @@ function ViewLoading() {
   return (
     <div className="flex h-full items-center justify-center">
       <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+    </div>
+  );
+}
+
+function ViewLoadError() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-sm">
+      <p>Could not load this view.</p>
+      <Button onClick={() => window.location.reload()}>Reload KiwiFS</Button>
     </div>
   );
 }
@@ -295,18 +305,30 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    setTreeLoading(true);
     api
       .tree("/")
-      .then((t) => setTree(t))
-      .catch(() => setTree(null))
-      .finally(() => setTreeLoading(false));
-  }, [refreshKey]);
+      .then((t) => {
+        if (!cancelled) setTree(t);
+      })
+      .catch(() => {
+        if (!cancelled) setTree(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTreeLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [refreshKey, spaceKey]);
 
   useEffect(() => {
-    if (!tree) return;
-    const timer = window.setTimeout(() => void refreshPublishedPages(), 1_500);
+    if (treeLoading) return;
+    const timer = window.setTimeout(
+      () => void refreshPublishedPages(),
+      tree ? 1_500 : 0,
+    );
     return () => window.clearTimeout(timer);
-  }, [tree, spaceKey, refreshPublishedPages]);
+  }, [tree, treeLoading, spaceKey, refreshPublishedPages]);
 
   useEffect(() => {
     if (!tree || !uiConfigLoaded || activePath) return;
@@ -765,7 +787,7 @@ const handleSpaceSwitch = useCallback(() => {
           {/* Sidebar */}
           <AppSidebar
             activePath={activePath}
-            treeRoot={tree}
+            treeRoot={treeLoading ? tree : (tree ?? undefined)}
             isMobile={isMobile}
             sidebarOpen={sidebarOpen}
             sidebarWidth={sidebarWidth}
@@ -823,6 +845,7 @@ const handleSpaceSwitch = useCallback(() => {
 
           {/* Main content area */}
           <main className={`flex-1 relative ${basesOpen || canvasOpen || whiteboardOpen || timelineOpen || kanbanOpen || dataOpen || graphOpen ? "overflow-hidden" : "overflow-auto kiwi-scroll"}`}>
+            <ErrorBoundary fallback={<ViewLoadError />}>
             <Suspense fallback={<ViewLoading />}>
             {basesOpen ? (
               <KiwiBases
@@ -947,6 +970,7 @@ const handleSpaceSwitch = useCallback(() => {
               </div>
             )}
             </Suspense>
+            </ErrorBoundary>
           </main>
         </div>
         </div>
@@ -954,18 +978,20 @@ const handleSpaceSwitch = useCallback(() => {
 
       {/* Modals */}
       {searchOpen && (
-        <Suspense fallback={null}>
-          <KiwiSearch
-            open={searchOpen}
-            onOpenChange={(open) => {
-              setSearchOpen(open);
-              if (!open) setSearchQuery(undefined);
-            }}
-            onSelect={(p) => navigate(p)}
-            tree={tree}
-            initialQuery={searchQuery}
-          />
-        </Suspense>
+        <ErrorBoundary fallback={<ViewLoadError />}>
+          <Suspense fallback={null}>
+            <KiwiSearch
+              open={searchOpen}
+              onOpenChange={(open) => {
+                setSearchOpen(open);
+                if (!open) setSearchQuery(undefined);
+              }}
+              onSelect={(p) => navigate(p)}
+              tree={tree}
+              initialQuery={searchQuery}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
       <NewPageDialog
         open={newOpen}

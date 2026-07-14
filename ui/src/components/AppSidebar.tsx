@@ -34,7 +34,7 @@ type RecentPage = { path: string };
 
 type AppSidebarProps = {
   activePath: string | null;
-  treeRoot: TreeEntry | null;
+  treeRoot: TreeEntry | null | undefined;
   isMobile: boolean;
   sidebarOpen: boolean;
   sidebarWidth: number;
