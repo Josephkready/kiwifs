@@ -1,24 +1,26 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readCollapsePref, writeCollapsePref } from "./collapsePref";
-
-/** Minimal localStorage stand-in — these tests run in the node environment. */
-function stubStorage() {
-  const store = new Map<string, string>();
-  return {
-    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
-    setItem: (k: string, v: string) => void store.set(k, v),
-    removeItem: (k: string) => void store.delete(k),
-    clear: () => store.clear(),
-    key: (i: number) => [...store.keys()][i] ?? null,
-    get length() {
-      return store.size;
-    },
-  } as Storage;
-}
 
 describe("collapsePref", () => {
   beforeEach(() => {
-    globalThis.localStorage = stubStorage();
+    // These tests run in the node environment — no localStorage unless stubbed.
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, val: string) => {
+        store.set(key, val);
+      },
+      removeItem: (key: string) => {
+        store.delete(key);
+      },
+      clear: () => {
+        store.clear();
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("defaults to collapsed when the section is not open by default", () => {
@@ -48,14 +50,14 @@ describe("collapsePref", () => {
   });
 
   it("falls back to the default when storage is unavailable", () => {
-    globalThis.localStorage = {
+    vi.stubGlobal("localStorage", {
       getItem: () => {
         throw new Error("denied");
       },
       setItem: () => {
         throw new Error("denied");
       },
-    } as unknown as Storage;
+    });
 
     expect(readCollapsePref("properties", false)).toBe(true);
     expect(() => writeCollapsePref("properties", true)).not.toThrow();

@@ -1226,7 +1226,7 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
 
 const LS_PROPERTIES = "properties";
 
-function FrontmatterProperties({
+export function FrontmatterProperties({
   properties,
   onTagClick,
 }: {
@@ -1256,7 +1256,7 @@ function FrontmatterProperties({
           <span className="font-normal text-muted-foreground">({properties.length})</span>
         )}
       </button>
-      <div className={collapsed ? "hidden" : "space-y-1.5 text-sm"}>
+      {!collapsed && <div className="space-y-1.5 text-sm">
         {properties.map((property) => (
           <div
             key={property.key}
@@ -1271,7 +1271,7 @@ function FrontmatterProperties({
             </div>
           </div>
         ))}
-      </div>
+      </div>}
     </section>
   );
 }
