@@ -14,6 +14,7 @@ import { AlertTriangle, BookOpen, Bug, Calendar, CheckCircle2, CheckSquare, Chev
 import { api, type TreeEntry } from "@kw/lib/api";
 import { dirOf, normalizePath, titleize } from "@kw/lib/paths";
 import { readingTime } from "@kw/lib/readingTime";
+import { readCollapsePref, writeCollapsePref } from "@kw/lib/collapsePref";
 import { HostPageActions } from "./HostPageActions";
 import { KiwiBreadcrumb } from "./KiwiBreadcrumb";
 import { KiwiToC } from "./KiwiToC";
@@ -1223,17 +1224,39 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
 
 /* ── Frontmatter properties ── */
 
-function FrontmatterProperties({
+const LS_PROPERTIES = "properties";
+
+export function FrontmatterProperties({
   properties,
   onTagClick,
 }: {
   properties: FrontmatterProperty[];
   onTagClick?: (tag: string) => void;
 }) {
+  // Collapsed by default: frontmatter is reference data, not what you came to read.
+  const [collapsed, setCollapsed] = useState(() => readCollapsePref(LS_PROPERTIES, false));
+
   return (
     <section className="mt-6 border-t border-border/70 pt-4" aria-label="Properties">
-      <div className="mb-2 text-sm font-semibold text-foreground">Properties</div>
-      <div className="space-y-1.5 text-sm">
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        onClick={() => {
+          const next = !collapsed;
+          setCollapsed(next);
+          writeCollapsePref(LS_PROPERTIES, next);
+        }}
+        className="mb-2 flex w-full items-center gap-1.5 text-sm font-semibold text-foreground/80 hover:text-foreground transition-colors"
+      >
+        {collapsed
+          ? <ChevronRight className="h-4 w-4 shrink-0" />
+          : <ChevronDown className="h-4 w-4 shrink-0" />}
+        <span>Properties</span>
+        {collapsed && (
+          <span className="font-normal text-muted-foreground">({properties.length})</span>
+        )}
+      </button>
+      {!collapsed && <div className="space-y-1.5 text-sm">
         {properties.map((property) => (
           <div
             key={property.key}
@@ -1248,7 +1271,7 @@ function FrontmatterProperties({
             </div>
           </div>
         ))}
-      </div>
+      </div>}
     </section>
   );
 }
@@ -1396,13 +1419,7 @@ function CollapsibleFooterSection({
   defaultOpen?: boolean;
   className?: string;
 }) {
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      const stored = localStorage.getItem(`kiwifs-${storageKey}`);
-      if (stored !== null) return stored === "1";
-    } catch {}
-    return !defaultOpen;
-  });
+  const [collapsed, setCollapsed] = useState(() => readCollapsePref(storageKey, !!defaultOpen));
 
   return (
     <div className={"border border-border rounded-lg" + (className ? " " + className : "")}>
@@ -1412,7 +1429,7 @@ function CollapsibleFooterSection({
         onClick={() => {
           const next = !collapsed;
           setCollapsed(next);
-          try { localStorage.setItem(`kiwifs-${storageKey}`, next ? "1" : "0"); } catch {}
+          writeCollapsePref(storageKey, next);
         }}
         className="flex items-center gap-2 w-full px-4 py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
       >
