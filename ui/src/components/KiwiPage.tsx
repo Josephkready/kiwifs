@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -10,10 +10,11 @@ import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import matter from "gray-matter";
 import Zoom from "react-medium-image-zoom";
 import "react-medium-image-zoom/dist/styles.css";
-import { AlertTriangle, BookOpen, Bug, Calendar, CheckCircle2, CheckSquare, ChevronDown, ChevronRight, CircleAlert, ClipboardList, Crosshair, Edit, Eye, File, FileAxis3D, FileQuestion, Flame, Folder, HelpCircle, History as HistoryIcon, Info, Lightbulb, Link2, List, ListChecks, MessageSquareQuote, NotebookPen, Pin, Plus, Quote, ScrollText, ShieldAlert, Star, Tag, TriangleAlert, Type, User, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, BookOpen, Bug, Calendar, Check, CheckCircle2, CheckSquare, ChevronDown, ChevronRight, CircleAlert, ClipboardList, Copy, Crosshair, Edit, Eye, File, FileAxis3D, FileQuestion, Flame, Folder, HelpCircle, History as HistoryIcon, Info, Lightbulb, Link2, List, ListChecks, MessageSquareQuote, NotebookPen, Pin, Plus, Quote, ScrollText, ShieldAlert, Star, Tag, TriangleAlert, Type, User, XCircle, Zap } from "lucide-react";
 import { api, type TreeEntry } from "@kw/lib/api";
 import { dirOf, normalizePath, titleize } from "@kw/lib/paths";
 import { readingTime } from "@kw/lib/readingTime";
+import { copyTextToClipboard } from "@kw/lib/clipboard";
 import { readCollapsePref, writeCollapsePref } from "@kw/lib/collapsePref";
 import { HostPageActions } from "./HostPageActions";
 import { KiwiBreadcrumb } from "./KiwiBreadcrumb";
@@ -406,7 +407,29 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
   const [versionError, setVersionError] = useState(false);
   const [commentError, setCommentError] = useState(false);
   const [localNote, setLocalNote] = useState<string | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied" | "failed">("idle");
   const proseRef = useRef<HTMLDivElement>(null);
+  const copyFeedbackTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (copyFeedbackTimer.current !== null) {
+      window.clearTimeout(copyFeedbackTimer.current);
+    }
+  }, []);
+
+  const handleCopyMarkdown = useCallback(async () => {
+    if (content === null) return;
+
+    const copied = await copyTextToClipboard(content);
+    setCopyFeedback(copied ? "copied" : "failed");
+    if (copyFeedbackTimer.current !== null) {
+      window.clearTimeout(copyFeedbackTimer.current);
+    }
+    copyFeedbackTimer.current = window.setTimeout(() => {
+      setCopyFeedback("idle");
+      copyFeedbackTimer.current = null;
+    }, 2000);
+  }, [content]);
 
   // In headless mode, sync content from prop
   useEffect(() => {
@@ -644,6 +667,16 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                     <TooltipContent side="bottom">{isStarred ? "Unstar" : "Star"}</TooltipContent>
                   </Tooltip>
                 )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyMarkdown}
+                  className="gap-1.5"
+                  aria-label={copyFeedback === "copied" ? "Markdown copied" : copyFeedback === "failed" ? "Copy Markdown failed; try again" : "Copy page as Markdown"}
+                >
+                  {copyFeedback === "copied" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  <span aria-live="polite">{copyFeedback === "copied" ? "Copied!" : copyFeedback === "failed" ? "Copy failed" : "Copy to MD"}</span>
+                </Button>
                 {onHistory && (
                   <Button variant="outline" size="sm" onClick={onHistory}>
                     <HistoryIcon className="h-3.5 w-3.5" /> <span className="hidden sm:inline">History</span>
