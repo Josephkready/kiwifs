@@ -667,16 +667,20 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                     <TooltipContent side="bottom">{isStarred ? "Unstar" : "Star"}</TooltipContent>
                   </Tooltip>
                 )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopyMarkdown}
-                  className="gap-1.5"
-                  aria-label={copyFeedback === "copied" ? "Markdown copied" : copyFeedback === "failed" ? "Copy Markdown failed; try again" : "Copy page as Markdown"}
-                >
-                  {copyFeedback === "copied" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  <span aria-live="polite">{copyFeedback === "copied" ? "Copied!" : copyFeedback === "failed" ? "Copy failed" : "Copy to MD"}</span>
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={handleCopyMarkdown}
+                      aria-label={copyFeedback === "copied" ? "Markdown copied" : copyFeedback === "failed" ? "Copy Markdown failed; try again" : "Copy page as Markdown"}
+                    >
+                      {copyFeedback === "copied" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                      <span className="sr-only" aria-live="polite">{copyFeedback === "copied" ? "Copied!" : copyFeedback === "failed" ? "Copy failed" : "Copy to MD"}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{copyFeedback === "copied" ? "Copied!" : copyFeedback === "failed" ? "Copy failed" : "Copy Markdown"}</TooltipContent>
+                </Tooltip>
                 {onHistory && (
                   <Button variant="outline" size="sm" onClick={onHistory}>
                     <HistoryIcon className="h-3.5 w-3.5" /> <span className="hidden sm:inline">History</span>
