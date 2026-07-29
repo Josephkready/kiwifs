@@ -5801,8 +5801,7 @@ paths:
       description: Queries page metadata using filters, sorting, and pagination.
       parameters:
       - collectionFormat: csv
-        description: AND filters in the format 'field operator value' (e.g. 'tags
-          contains project')
+        description: Repeatable JSON-path filters (e.g. '$.tags[*]=project')
         in: query
         items:
           type: string

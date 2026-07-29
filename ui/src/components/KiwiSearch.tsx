@@ -8,9 +8,14 @@ import {
   CommandItem,
   CommandList,
 } from "@kw/components/ui/command";
-import { api, type MetaFilter, type SemanticResult, type TreeEntry } from "@kw/lib/api";
+import { api, type SearchSuggestion, type TreeEntry } from "@kw/lib/api";
 import { titleize } from "@kw/lib/paths";
 import { cn } from "@kw/lib/cn";
+import {
+  executeSearch,
+  parseFieldFilters,
+  type SearchHit as Hit,
+} from "@kw/lib/searchQuery";
 
 const RECENT_KEY = "kiwi:recent-searches";
 const MAX_RECENT = 8;
@@ -21,19 +26,6 @@ type Props = {
   onSelect: (path: string) => void;
   tree: TreeEntry | null;
   initialQuery?: string;
-};
-
-type Hit = {
-  path: string;
-  snippet?: string;
-  score?: number;
-};
-
-type SearchSuggestion = {
-  query: string;
-  path: string;
-  title: string;
-  distance: number;
 };
 
 function topDirs(tree: TreeEntry | null): string[] {
@@ -110,96 +102,12 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
     debounce.current = window.setTimeout(() => {
       const thisRequest = ++requestId.current;
       const modifiedAfter = dateFilterToISO(dateFilter);
-      const { text: textQuery, filters: metaFilters } = parseFieldFilters(query);
-
-      const searchQ = textQuery.trim();
-      if (!searchQ && metaFilters.length === 0) {
-        setHits([]);
-        setLoading(false);
-        return;
-      }
-
-      const metaPromise = metaFilters.length > 0
-        ? api.meta({ where: metaFilters, limit: 200 }).then((r) =>
-            new Set(r.results.map((x) => x.path))
-          ).catch(() => null as Set<string> | null)
-        : Promise.resolve(null as Set<string> | null);
-
       const dateOpts = modifiedAfter ? { modifiedAfter } : undefined;
-
-      // Fire FTS and semantic in parallel — merge results from both.
-      const ftsPromise = searchQ
-        ? api.search(searchQ, dateOpts).catch(() => null)
-        : Promise.resolve(null);
-
-      const semanticPromise = searchQ
-        ? api.semanticSearch(searchQ, 15, 0, dateOpts).catch(() => null)
-        : Promise.resolve(null);
-
-      Promise.all([ftsPromise, semanticPromise, metaPromise]).then(
-        ([ftsRes, semRes, metaPaths]) => {
+      executeSearch(api, query, dateOpts).then(
+        ({ results, suggestions: nextSuggestions }) => {
           if (thisRequest !== requestId.current) return;
-
-          // Collect results into a map keyed by path, merging both sources.
-          const merged = new Map<string, Hit>();
-
-          // FTS results first (keyword-precise, keep their snippets).
-          if (ftsRes) {
-            for (const x of ftsRes.results) {
-              merged.set(x.path, {
-                path: x.path,
-                snippet: x.snippet,
-                score: x.score,
-              });
-            }
-          }
-
-          // Fold in semantic results — prefer semantic snippet only if FTS
-          // didn't already provide one (FTS snippets have highlighted markup).
-          if (semRes) {
-            // Deduplicate semantic hits per-path (keep highest score chunk).
-            const bestSem = new Map<string, SemanticResult>();
-            for (const hit of semRes.results) {
-              const prev = bestSem.get(hit.path);
-              if (!prev || hit.score > prev.score) bestSem.set(hit.path, hit);
-            }
-
-            for (const [path, sem] of bestSem) {
-              const existing = merged.get(path);
-              if (existing) {
-                // Path already in FTS results — boost its score.
-                existing.score = (existing.score ?? 0) + (sem.score ?? 0);
-              } else {
-                merged.set(path, {
-                  path,
-                  snippet: highlightTerms(sem.snippet, query),
-                  score: sem.score,
-                });
-              }
-            }
-          }
-
-          let results = Array.from(merged.values());
-
-          // Apply metadata filters if present.
-          if (metaPaths) {
-            if (results.length > 0) {
-              results = results.filter((h) => metaPaths.has(h.path));
-            } else {
-              // Only metadata filters, no text query matched — show meta paths.
-              results = Array.from(metaPaths).map((p) => ({ path: p }));
-            }
-          }
-
-          // Sort by combined score descending.
-          results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-
           setHits(results);
-          setSuggestions(
-            results.length === 0 && ftsRes?.suggestions?.length
-              ? ftsRes.suggestions
-              : []
-          );
+          setSuggestions(nextSuggestions);
         },
       )
         .catch(() => {
@@ -392,42 +300,12 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
   );
 }
 
-function parseFieldFilters(q: string): { text: string; filters: MetaFilter[] } {
-  const filters: MetaFilter[] = [];
-  const textParts: string[] = [];
-  for (const token of q.split(/\s+/)) {
-    const colonIdx = token.indexOf(":");
-    if (colonIdx > 0 && colonIdx < token.length - 1) {
-      const field = token.slice(0, colonIdx);
-      const value = token.slice(colonIdx + 1);
-      if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(field)) {
-        filters.push({ field: `$.${field}`, op: "=", value });
-        continue;
-      }
-    }
-    textParts.push(token);
-  }
-  return { text: textParts.join(" "), filters };
-}
-
 function dateFilterToISO(filter: string): string | undefined {
   if (!filter) return undefined;
   const days = filter === "7d" ? 7 : filter === "30d" ? 30 : filter === "90d" ? 90 : 0;
   if (days === 0) return undefined;
   const d = new Date(Date.now() - days * 86400_000);
   return d.toISOString();
-}
-
-function highlightTerms(text: string, query: string): string {
-  const words = query.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return escapeHtml(text);
-  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const re = new RegExp(`(${escaped.join("|")})`, "gi");
-  return escapeHtml(text).replace(re, "<mark>$1</mark>");
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function ModeChip({

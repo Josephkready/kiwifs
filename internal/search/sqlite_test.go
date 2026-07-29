@@ -233,6 +233,63 @@ func TestQueryMeta(t *testing.T) {
 	}
 }
 
+func TestQueryMetaScalarArrayFilterSkipsMalformedLegacyFrontmatter(t *testing.T) {
+	s := newTestSQLite(t)
+	if err := s.IndexMeta(ctxBG, "tagged.md", []byte("---\ntags: [ancestry, family]\n---\n")); err != nil {
+		t.Fatalf("IndexMeta tagged: %v", err)
+	}
+	if err := s.IndexMeta(ctxBG, "partial.md", []byte("---\ntags: [ancestry-extra]\n---\n")); err != nil {
+		t.Fatalf("IndexMeta partial: %v", err)
+	}
+	if err := s.IndexMeta(ctxBG, "legacy.md", []byte("---\ntags: [legacy]\n---\n")); err != nil {
+		t.Fatalf("IndexMeta legacy: %v", err)
+	}
+	rows, err := s.writeDB.QueryContext(
+		ctxBG,
+		`SELECT name FROM sqlite_master
+		 WHERE type = 'index' AND tbl_name = 'file_meta' AND sql LIKE '%json_extract%'`,
+	)
+	if err != nil {
+		t.Fatalf("list metadata indexes: %v", err)
+	}
+	var indexes []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan metadata index: %v", err)
+		}
+		indexes = append(indexes, name)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close metadata index rows: %v", err)
+	}
+	for _, name := range indexes {
+		if _, err := s.writeDB.ExecContext(ctxBG, fmt.Sprintf(`DROP INDEX %q`, name)); err != nil {
+			t.Fatalf("drop metadata index %s: %v", name, err)
+		}
+	}
+	if _, err := s.writeDB.ExecContext(
+		ctxBG, `UPDATE file_meta SET frontmatter = 'not-json' WHERE path = 'legacy.md'`,
+	); err != nil {
+		t.Fatalf("corrupt legacy row: %v", err)
+	}
+
+	got, err := s.QueryMeta(
+		ctxBG,
+		[]MetaFilter{{Field: "$.tags[*]", Op: "=", Value: "ancestry"}},
+		"",
+		"",
+		0,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("QueryMeta: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "tagged.md" {
+		t.Fatalf("tag query results: %+v", got)
+	}
+}
+
 func TestMaxFrontmatterIntInDirectory(t *testing.T) {
 	s := newTestSQLite(t)
 	ctx := ctxBG
@@ -1441,12 +1498,12 @@ See [[pages/peer.md]] in the body.
 	}
 
 	wantTyped := map[string]string{
-		"pages/old-adr.md":    "supersedes",
-		"pages/new-adr.md":    "superseded_by",
+		"pages/old-adr.md":     "supersedes",
+		"pages/new-adr.md":     "superseded_by",
 		"pages/base-prompt.md": "variant_of",
-		"pages/alt-prompt.md": "variant_of",
-		"pages/paper.md":      "cites",
-		"runbooks/oncall.md":  "services",
+		"pages/alt-prompt.md":  "variant_of",
+		"pages/paper.md":       "cites",
+		"runbooks/oncall.md":   "services",
 	}
 	edges, err := s.AllEdges(ctxBG)
 	if err != nil {

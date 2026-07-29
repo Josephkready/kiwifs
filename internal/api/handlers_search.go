@@ -499,7 +499,7 @@ func filterVectorResultsByScope(ctx context.Context, sf search.ScopeFilterer, re
 //	@Description	Queries page metadata using filters, sorting, and pagination.
 //	@Tags			search
 //	@Security		BearerAuth
-//	@Param			where	query		[]string	false	"AND filters in the format 'field operator value' (e.g. 'tags contains project')"
+//	@Param			where	query		[]string	false	"Repeatable JSON-path filters (e.g. '$.tags[*]=project')"
 //	@Param			or		query		[]string	false	"OR filters in the format 'field operator value'"
 //	@Param			sort	query		string		false	"Field to sort the results by"
 //	@Param			order	query		string		false	"Sorting order ('asc' or 'desc')"
