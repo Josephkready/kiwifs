@@ -144,8 +144,12 @@ Supported operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `LIKE`.
 Array membership:
 
 ```
+GET /api/kiwi/meta?where=$.tags[*]=ancestry
 GET /api/kiwi/meta?where=$.derived-from[*].id=run-249
 ```
+
+The first form compares scalar array elements directly; the second extracts a field
+from each object in an array.
 
 ---
 

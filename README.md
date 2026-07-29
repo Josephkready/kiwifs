@@ -82,6 +82,10 @@ echo "# Report" > /kiwi/r.md      Cmd+K search, backlinks, TOC
 
 [See all features and configuration](https://docs.kiwifs.com)
 
+Reader searches accept metadata filters alongside text. Use `tag:ancestry` or
+`tags:ancestry` for exact membership in the frontmatter `tags` array; for example,
+`estate tag:ancestry` returns pages that match `estate` and carry that exact tag.
+
 ---
 
 ## Quickstart

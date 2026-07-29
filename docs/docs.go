@@ -5278,7 +5278,7 @@ const docTemplate = `{
                             "type": "string"
                         },
                         "collectionFormat": "csv",
-                        "description": "AND filters in the format 'field operator value' (e.g. 'tags contains project')",
+                        "description": "Repeatable JSON-path filters (e.g. '$.tags[*]=project')",
                         "name": "where",
                         "in": "query"
                     },
