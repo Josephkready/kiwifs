@@ -88,4 +88,13 @@ describe("executeSearch", () => {
 
     expect(result.results).toEqual([]);
   });
+
+  it("does not fall back to tag-only hits when combined text search is empty", async () => {
+    const api = client();
+    api.search.mockResolvedValue({ query: "missing", results: [] });
+
+    const result = await executeSearch(api, "missing tag:ancestry");
+
+    expect(result.results).toEqual([]);
+  });
 });

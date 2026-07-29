@@ -99,7 +99,7 @@ export async function executeSearch(
 
   let results = Array.from(merged.values());
   if (metaPaths) {
-    results = results.length > 0
+    results = searchQ
       ? results.filter((result) => metaPaths.has(result.path))
       : Array.from(metaPaths).map((path) => ({ path }));
   }
