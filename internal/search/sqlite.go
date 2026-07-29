@@ -1340,6 +1340,7 @@ func (s *SQLite) QueryMetaOr(ctx context.Context, andFilters, orFilters []MetaFi
 	limit = NormalizeLimit(limit)
 	offset = NormalizeOffset(offset)
 
+	const safeFrontmatter = "CASE WHEN json_valid(frontmatter) THEN frontmatter ELSE '{}' END"
 	var (
 		conditions []string
 		args       []any
@@ -1354,12 +1355,18 @@ func (s *SQLite) QueryMetaOr(ctx context.Context, andFilters, orFilters []MetaFi
 			return "", nil, fmt.Errorf("filter[%d]: invalid op %q", i, f.Op)
 		}
 		if parent, sub, isArr := arrayPathPrefix(f.Field); isArr {
+			if sub == "$" {
+				return fmt.Sprintf(
+					"EXISTS (SELECT 1 FROM json_each("+safeFrontmatter+", ?) AS j WHERE j.value %s ?)",
+					op,
+				), []any{parent, f.Value}, nil
+			}
 			return fmt.Sprintf(
-				"EXISTS (SELECT 1 FROM json_each(frontmatter, ?) AS j WHERE json_extract(j.value, ?) %s ?)",
+				"EXISTS (SELECT 1 FROM json_each("+safeFrontmatter+", ?) AS j WHERE json_extract(j.value, ?) %s ?)",
 				op,
 			), []any{parent, sub, f.Value}, nil
 		}
-		return fmt.Sprintf("json_extract(frontmatter, ?) %s ?", op), []any{f.Field, f.Value}, nil
+		return fmt.Sprintf("json_extract("+safeFrontmatter+", ?) %s ?", op), []any{f.Field, f.Value}, nil
 	}
 
 	for i, f := range andFilters {
@@ -1398,7 +1405,7 @@ func (s *SQLite) QueryMetaOr(ctx context.Context, andFilters, orFilters []MetaFi
 		if strings.EqualFold(order, "desc") {
 			dir = "DESC"
 		}
-		sb.WriteString(" ORDER BY json_extract(frontmatter, ?) ")
+		sb.WriteString(" ORDER BY json_extract(" + safeFrontmatter + ", ?) ")
 		sb.WriteString(dir)
 		args = append(args, sort)
 	} else {

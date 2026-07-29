@@ -8,9 +8,10 @@ import {
   CommandItem,
   CommandList,
 } from "@kw/components/ui/command";
-import { api, type MetaFilter, type SemanticResult, type TreeEntry } from "@kw/lib/api";
+import { api, type SemanticResult, type TreeEntry } from "@kw/lib/api";
 import { titleize } from "@kw/lib/paths";
 import { cn } from "@kw/lib/cn";
+import { parseFieldFilters } from "@kw/lib/searchQuery";
 
 const RECENT_KEY = "kiwi:recent-searches";
 const MAX_RECENT = 8;
@@ -390,24 +391,6 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
       </div>
     </CommandDialog>
   );
-}
-
-function parseFieldFilters(q: string): { text: string; filters: MetaFilter[] } {
-  const filters: MetaFilter[] = [];
-  const textParts: string[] = [];
-  for (const token of q.split(/\s+/)) {
-    const colonIdx = token.indexOf(":");
-    if (colonIdx > 0 && colonIdx < token.length - 1) {
-      const field = token.slice(0, colonIdx);
-      const value = token.slice(colonIdx + 1);
-      if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(field)) {
-        filters.push({ field: `$.${field}`, op: "=", value });
-        continue;
-      }
-    }
-    textParts.push(token);
-  }
-  return { text: textParts.join(" "), filters };
 }
 
 function dateFilterToISO(filter: string): string | undefined {
