@@ -78,6 +78,8 @@ type Props = {
   onMoved?: (newPath: string) => void;
   onTagClick?: (tag: string) => void;
   refreshKey?: number;
+  /** Bumped only by comment.* events — refreshes comments without re-fetching the note body. */
+  commentsRefreshKey?: number;
   onPublishedChanged?: () => void;
 
   /** Called when a [[wiki link]] is clicked. Receives the resolved target path. */
@@ -390,7 +392,7 @@ function classifyMedia(src: string): "image" | "video" | "audio" | "pdf" | "unkn
   return "unknown";
 }
 
-export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, onEdit, onHistory, onRevealInTree, onToggleStar, isStarred, onTogglePin, isPinned, onDeleted, onDuplicated, onMoved, onTagClick, refreshKey, onPublishedChanged, onWikiLinkClick, onHeadingVisible: _onHeadingVisible, className }: Props) {
+export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, onEdit, onHistory, onRevealInTree, onToggleStar, isStarred, onTogglePin, isPinned, onDeleted, onDuplicated, onMoved, onTagClick, refreshKey, commentsRefreshKey = 0, onPublishedChanged, onWikiLinkClick, onHeadingVisible: _onHeadingVisible, className }: Props) {
   const isHeadless = contentProp != null;
   const nav = onNavigate ?? (() => {});
 
@@ -487,7 +489,7 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
       if (!cancelled) setCommentCount(r.comments.length);
     }).catch(() => { if (!cancelled) setCommentError(true); });
     return () => { cancelled = true; };
-  }, [path, refreshKey, isDir, isHeadless]);
+  }, [path, commentsRefreshKey, isDir, isHeadless]);
 
   useEffect(() => {
     if (isHeadless || isDir || !path) return;
@@ -1227,7 +1229,7 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                   path={path}
                   containerRef={proseRef}
                   renderKey={content}
-                  refreshKey={refreshKey}
+                  refreshKey={commentsRefreshKey}
                 />
 
                 <CollapsibleFooterSection

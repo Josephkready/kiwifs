@@ -19,6 +19,7 @@ import type { KiwiTreeHandle } from "./components/KiwiTree";
 import { AppSidebar } from "./components/AppSidebar";
 import type { TreeSortMode } from "./lib/treeTransform";
 import { shouldRefreshTreeImmediately } from "./lib/treeRefresh";
+import { PAGE_REFRESH_EVENTS, COMMENT_EVENTS } from "./lib/sseEvents";
 import { usePublishedPagesStore } from "./stores/publishedPagesStore";
 import { KiwiPage } from "./components/KiwiPage";
 import { KiwiRecentStart } from "./components/KiwiRecentStart";
@@ -104,6 +105,10 @@ export default function App() {
   const [treeLoading, setTreeLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Bumped only by comment.* SSE events, so posting/resolving a comment refreshes
+  // the comments list + count WITHOUT re-fetching the note body (which is what the
+  // page-wide refreshKey does). Without this split, a comment reloaded the page.
+  const [commentsRefreshKey, setCommentsRefreshKey] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string | undefined>();
   const [newOpen, setNewOpen] = useState(false);
@@ -502,11 +507,16 @@ const handleSpaceSwitch = useCallback(() => {
       }
       scheduleTreeReconcile();
     };
-    const events = ["write", "delete", "bulk", "comment.add", "comment.delete"];
-    events.forEach((name) => es.addEventListener(name, bump));
+    // Comment events touch only .kiwi/comments/ — never the note body or the tree —
+    // so they refresh the comments list ONLY, not the whole page. Content/tree
+    // mutations still go through bump() (page refresh + tree reconcile).
+    const bumpComments = () => setCommentsRefreshKey((k) => k + 1);
+    PAGE_REFRESH_EVENTS.forEach((name) => es.addEventListener(name, bump));
+    COMMENT_EVENTS.forEach((name) => es.addEventListener(name, bumpComments));
     es.onerror = () => {};
     return () => {
-      events.forEach((name) => es.removeEventListener(name, bump));
+      PAGE_REFRESH_EVENTS.forEach((name) => es.removeEventListener(name, bump));
+      COMMENT_EVENTS.forEach((name) => es.removeEventListener(name, bumpComments));
       es.close();
     };
   }, [scheduleTreeReconcile, spaceKey]);
@@ -939,6 +949,7 @@ const handleSpaceSwitch = useCallback(() => {
                   setSearchOpen(true);
                 }}
                 refreshKey={refreshKey}
+                commentsRefreshKey={commentsRefreshKey}
                 onPublishedChanged={refreshPublishedPages}
               />
             ) : treeLoading || !uiConfigLoaded ? (
