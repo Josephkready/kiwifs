@@ -33,6 +33,34 @@ describe("remarkNeutralizeTextDirectives", () => {
     const p = tree.children[0];
     expect(p.children.some((n: any) => n.type === "textDirective")).toBe(false);
     expect(textOf(p.children)).toBe("1:1 for one year");
+    // structure, not just text: every replacement node is a plain text node
+    expect(p.children.every((n: any) => n.type === "text")).toBe(true);
+  });
+
+  it("neutralizes multiple text directives in one paragraph", () => {
+    // the visitor splices in place and re-visits — a later directive in the
+    // same parent must still be processed. Mirrors how remark-directive parses
+    // "her 1:1 clients and 2:1 odds": the digit before each colon stays in the
+    // preceding text node, the colon+name becomes the directive.
+    const tree = {
+      type: "root",
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            { type: "text", value: "her 1" },
+            { type: "textDirective", name: "1", children: [] },
+            { type: "text", value: " clients and 2" },
+            { type: "textDirective", name: "1", children: [] },
+            { type: "text", value: " odds" },
+          ],
+        },
+      ],
+    };
+    run(tree);
+    const p = tree.children[0];
+    expect(p.children.some((n: any) => n.type === "textDirective")).toBe(false);
+    expect(textOf(p.children)).toBe("her 1:1 clients and 2:1 odds");
   });
 
   it("restores a clock time like '11:24'", () => {
