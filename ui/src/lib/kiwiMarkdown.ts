@@ -10,19 +10,16 @@
  */
 
 import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
 import remarkEmoji from "remark-emoji";
-import remarkSupersub from "remark-supersub";
 import remarkDefinitionList from "remark-definition-list";
 import remarkDirective from "remark-directive";
 import rehypeSlug from "rehype-slug";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import rehypeKatex from "rehype-katex";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 
 import { remarkMark, remarkInlineTags, rehypeCodeMeta } from "./remarkPlugins";
-import { remarkKiwiDirectives } from "./remarkDirectives";
+import { remarkKiwiDirectives, remarkNeutralizeTextDirectives } from "./remarkDirectives";
 import { remarkWikiLinks, type LinkResolver } from "./wikiLinks";
 
 export { stripObsidianComments } from "./remarkPlugins";
@@ -114,14 +111,13 @@ export const kiwiSanitizeSchema = {
 export function kiwiRemarkPlugins(resolver?: LinkResolver): any[] {
   const plugins: any[] = [
     remarkGfm,
-    remarkMath,
     remarkMark,
     remarkInlineTags,
     remarkEmoji,
-    remarkSupersub,
     remarkDefinitionList,
     remarkDirective,
     remarkKiwiDirectives,
+    remarkNeutralizeTextDirectives,
   ];
   if (resolver) {
     plugins.push([remarkWikiLinks, { resolver }]);
@@ -139,7 +135,6 @@ export function kiwiRehypePlugins(autolinkHeadings = true): any[] {
     rehypeCodeMeta,
     rehypeRaw,
     [rehypeSanitize, kiwiSanitizeSchema],
-    rehypeKatex,
     rehypeSlug,
   ];
   if (autolinkHeadings) {
