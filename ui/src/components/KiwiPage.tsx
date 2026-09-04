@@ -1,11 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
 import rehypeSlug from "rehype-slug";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import rehypeKatex from "rehype-katex";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import matter from "gray-matter";
 import Zoom from "react-medium-image-zoom";
@@ -47,12 +45,11 @@ import { Badge } from "@kw/components/ui/badge";
 import { Button } from "@kw/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kw/components/ui/tooltip";
 import remarkEmoji from "remark-emoji";
-import remarkSupersub from "remark-supersub";
 import remarkDefinitionList from "remark-definition-list";
 import { buildResolver, remarkWikiLinks } from "@kw/lib/wikiLinks";
 import { remarkMark, stripObsidianComments, remarkInlineTags, rehypeCodeMeta } from "@kw/lib/remarkPlugins";
 import remarkDirective from "remark-directive";
-import { remarkKiwiDirectives } from "@kw/lib/remarkDirectives";
+import { remarkKiwiDirectives, remarkNeutralizeTextDirectives } from "@kw/lib/remarkDirectives";
 
 type Props = {
   /** Page path in the KiwiFS tree. Used for API fetching in connected mode. */
@@ -801,21 +798,19 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                 <ReactMarkdown
                   remarkPlugins={[
                     remarkGfm,
-                    remarkMath,
                     remarkMark,
                     remarkInlineTags,
                     remarkEmoji,
-                    remarkSupersub,
                     remarkDefinitionList,
                     remarkDirective,
                     remarkKiwiDirectives,
+                    remarkNeutralizeTextDirectives,
                     [remarkWikiLinks, { resolver }],
                   ]}
                   rehypePlugins={[
                     rehypeCodeMeta,
                     rehypeRaw,
                     [rehypeSanitize, sanitizeSchema],
-                    rehypeKatex,
                     rehypeSlug,
                     [rehypeAutolinkHeadings, { behavior: "wrap" }],
                   ]}
@@ -1179,21 +1174,19 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                         <ReactMarkdown
                           remarkPlugins={[
                             remarkGfm,
-                            remarkMath,
                             remarkMark,
                             remarkInlineTags,
                             remarkEmoji,
-                            remarkSupersub,
                             remarkDefinitionList,
                             remarkDirective,
                             remarkKiwiDirectives,
+                            remarkNeutralizeTextDirectives,
                             [remarkWikiLinks, { resolver }],
                           ]}
                           rehypePlugins={[
                             rehypeCodeMeta,
                             rehypeRaw,
                             [rehypeSanitize, sanitizeSchema],
-                            rehypeKatex,
                             rehypeSlug,
                           ]}
                           components={{

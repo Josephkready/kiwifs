@@ -124,6 +124,33 @@ export function remarkKiwiDirectives() {
 }
 
 /**
+ * remarkNeutralizeTextDirectives — turn stray inline text directives back into
+ * literal text.
+ *
+ * remark-directive reads any `:word` as a text directive, so ordinary prose —
+ * clock times (`11:24`), ratios, `1:1` — is parsed as a directive and rendered
+ * as an empty <div> that breaks the surrounding paragraph. KiwiFS only *uses*
+ * the container/leaf directives handled by remarkKiwiDirectives (tabs, columns),
+ * which set `data.hName`. Running after that plugin, this one rewrites every
+ * remaining text directive back into the source text it came from (`:` + name,
+ * plus any `[label]`), so `:` glued to a word/number renders as written.
+ */
+export function remarkNeutralizeTextDirectives() {
+  return (tree: Root) => {
+    visit(tree, (node: any, index, parent: any) => {
+      if (!parent || index == null || node.type !== "textDirective") return;
+      if (node.data?.hName) return; // handled elsewhere — leave it
+      const replacement: any[] = [{ type: "text", value: ":" + (node.name ?? "") }];
+      if (Array.isArray(node.children) && node.children.length > 0) {
+        replacement.push({ type: "text", value: "[" }, ...node.children, { type: "text", value: "]" });
+      }
+      parent.children.splice(index, 1, ...replacement);
+      return index; // re-visit from here; the inserted text nodes are inert
+    });
+  };
+}
+
+/**
  * Extract the label text from a directive node.
  * Directive labels come from [Label] syntax: ::tab[My Label]
  */
