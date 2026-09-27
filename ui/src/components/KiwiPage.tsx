@@ -38,6 +38,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { KiwiWidget } from "./KiwiWidget";
 import { CodeRunner } from "@kw/widgets/CodeRunner";
 import { PageTracker } from "@kw/widgets/PageTracker";
+import { useUIConfigStore } from "@kw/lib/uiConfigStore";
 
 import { PageSkeleton } from "./PageSkeleton";
 import { trackRecent } from "./KiwiFavorites";
@@ -392,6 +393,7 @@ function classifyMedia(src: string): "image" | "video" | "audio" | "pdf" | "unkn
 export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, onEdit, onHistory, onRevealInTree, onToggleStar, isStarred, onTogglePin, isPinned, onDeleted, onDuplicated, onMoved, onTagClick, refreshKey, commentsRefreshKey = 0, onPublishedChanged, onWikiLinkClick, onHeadingVisible: _onHeadingVisible, className }: Props) {
   const isHeadless = contentProp != null;
   const nav = onNavigate ?? (() => {});
+  const features = useUIConfigStore((s) => s.features);
 
   const treeEntry = useMemo(() => findEntry(tree ?? null, path), [tree, path]);
   const isDir = !isHeadless && (treeEntry?.isDir ?? false);
@@ -680,23 +682,27 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                   </TooltipTrigger>
                   <TooltipContent side="bottom">{copyFeedback === "copied" ? "Copied!" : copyFeedback === "failed" ? "Copy failed" : "Copy Markdown"}</TooltipContent>
                 </Tooltip>
-                {onHistory && (
+                {features.history && onHistory && (
                   <Button variant="outline" size="sm" onClick={onHistory}>
                     <HistoryIcon className="h-3.5 w-3.5" /> <span className="hidden sm:inline">History</span>
                   </Button>
                 )}
-                {onEdit && (
+                {features.edit && onEdit && (
                 <Button variant="outline" size="sm" onClick={onEdit}>
                   <Edit className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Edit</span>
                 </Button>
                 )}
-                <PublishButton path={path} onPublishedChanged={onPublishedChanged} />
+                {features.publish && (
+                  <PublishButton path={path} onPublishedChanged={onPublishedChanged} />
+                )}
+                {features.edit && (
                 <PageActions
                   path={path}
                   onDeleted={onDeleted}
                   onDuplicated={onDuplicated}
                   onMoved={onMoved}
                 />
+                )}
               </div>
             </div>
 
@@ -824,8 +830,9 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                         const anchor = hashIdx >= 0 ? raw.slice(hashIdx) : "";
                         return (
                           <a
-                            href={`#${raw}`}
+                            href={`/page/${pagePath}${anchor}`}
                             onClick={(e) => {
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                               e.preventDefault();
                               if (onWikiLinkClick) onWikiLinkClick(pagePath);
                               else nav(pagePath);
@@ -849,8 +856,9 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                         const target = h.slice("#kiwi-missing:".length);
                         return (
                           <a
-                            href="#"
+                            href={`/page/${target}.md`}
                             onClick={(e) => {
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                               e.preventDefault();
                               if (onWikiLinkClick) onWikiLinkClick(target);
                               else nav(`${target}.md`);
@@ -893,6 +901,7 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                           <a
                             href={`/page/${resolved}${anchor ? `#${anchor}` : ""}`}
                             onClick={(e) => {
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                               e.preventDefault();
                               nav(resolved);
                               if (anchor) {
