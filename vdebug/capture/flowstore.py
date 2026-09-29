@@ -26,8 +26,11 @@ import datetime as dt
 import hashlib
 import json
 import pathlib
+import re
 import sqlite3
 import sys
+import threading
+import time
 from typing import Any
 
 SCHEMA = pathlib.Path(__file__).with_name("schema.sql")
@@ -48,6 +51,14 @@ DATA_KEYS = {
 MAX_EVENTS_PER_BATCH = 500
 MAX_STR = 200
 MAX_EVENTS_PER_SESSION = 5000  # a runaway client can't grow the DB without bound
+# ...and minting fresh session ids can't either: store-wide ceilings (new sessions are refused).
+MAX_SESSIONS = 20_000
+MAX_EVENTS = 1_000_000
+SESSION_ID = re.compile(r"[A-Za-z0-9]{8,64}")  # ASCII only (str.isalnum() accepts any script)
+PRUNE_INTERVAL_S = 24 * 3600
+
+_last_prune: dict[str, float] = {}  # path -> monotonic time of the last lazy prune
+_lock = threading.Lock()
 
 
 class BatchError(ValueError):
@@ -69,6 +80,16 @@ def _int(v: Any) -> int | None:
         return int(v)
     except (TypeError, ValueError):
         return None
+
+
+def _clean_path(v: Any) -> str | None:
+    """Path with query VALUES stripped (keys kept) — never trust the client to have done it."""
+    path = _s(v)
+    if path is None or "?" not in path:
+        return path
+    base, _, query = path.partition("?")
+    keys = [kv.split("=", 1)[0] for kv in query.split("&") if kv]
+    return base + ("?" + "&".join(k + "=" for k in keys) if keys else "")
 
 
 def _clean_target(t: Any) -> str | None:
@@ -103,12 +124,31 @@ def ua_class(user_agent: str | None, viewport_w: int | None) -> str:
 
 
 class FlowStore:
-    def __init__(self, path: str | pathlib.Path):
+    """One connection. Cheap to open per request (the schema is applied once per process).
+
+    prune_days: lazy retention — on open, delete sessions idle longer than this, at most once
+    a day per db per process. No cron/timer (and so no infra change) needed. None disables it.
+    """
+
+    def __init__(self, path: str | pathlib.Path, *, prune_days: int | None = None):
         self.path = str(path)
+        pathlib.Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.path, timeout=10)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
-        self.db.executescript(SCHEMA.read_text())
+        # Apply the schema only when it's missing: a cheap catalog lookup, and still correct if
+        # the db file was deleted and recreated while this process kept running.
+        if not self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions'").fetchone():
+            self.db.executescript(SCHEMA.read_text())
+        self.last_ingest: dict | None = None
+        if prune_days is not None:
+            now = time.monotonic()
+            with _lock:
+                due = now - _last_prune.get(self.path, -PRUNE_INTERVAL_S) >= PRUNE_INTERVAL_S
+                if due:
+                    _last_prune[self.path] = now
+            if due:
+                self.prune(prune_days)
 
     def close(self) -> None:
         self.db.close()
@@ -123,7 +163,7 @@ class FlowStore:
         if not isinstance(batch, dict):
             raise BatchError("batch must be an object")
         sid = batch.get("session_id")
-        if not isinstance(sid, str) or not (8 <= len(sid) <= 64) or not sid.isalnum():
+        if not isinstance(sid, str) or not SESSION_ID.fullmatch(sid):
             raise BatchError("session_id must be 8-64 alphanumerics")
         events = batch.get("events")
         if not isinstance(events, list) or not events:
@@ -139,6 +179,11 @@ class FlowStore:
                 "SELECT event_count FROM sessions WHERE id = ?", (sid,)
             ).fetchone()
             if row is None:
+                n_sessions, n_events = self.db.execute(
+                    "SELECT (SELECT COUNT(*) FROM sessions), (SELECT COUNT(*) FROM events)").fetchone()
+                if n_sessions >= MAX_SESSIONS or n_events >= MAX_EVENTS:
+                    self.last_ingest = {"stored": 0, "duplicate": 0, "invalid": 0, "capped": True}
+                    return 0
                 self.db.execute(
                     "INSERT INTO sessions (id, started_at, last_seen_at, viewport_w, viewport_h, ua_class)"
                     " VALUES (?, ?, ?, ?, ?, ?)",
@@ -164,7 +209,7 @@ class FlowStore:
                     "INSERT OR IGNORE INTO events (session_id, seq, t_ms, type, path, target, data)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
-                        sid, seq, t_ms, ev["type"], _s(ev.get("path")),
+                        sid, seq, t_ms, ev["type"], _clean_path(ev.get("path")),
                         _clean_target(ev.get("target")), _clean_data(ev["type"], ev.get("data")),
                     ),
                 )

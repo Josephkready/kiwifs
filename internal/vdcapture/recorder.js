@@ -9,7 +9,11 @@
  *   - Input VALUES are never sent — only the field kind and length. The one exception
  *     is <select>/radio/checkbox elements the app opts in with data-vd-capture-value.
  *   - Query-string VALUES are stripped from paths (keys kept: ?q=&page=).
- *   - Anything under [data-vd-mask] reports no accessible name.
+ *   - Anything under [data-vd-mask] reports no accessible name, no click position and no
+ *     value (even when opted in). Mask every region whose LABELS are content or answers:
+ *     on a rating/choice UI the label or the click position IS the answer.
+ *   - data-vd-unmask inside a mask re-exposes one harmless control (a Send button).
+ *   - document.title is not sent unless VD_CAPTURE.captureTitle = true (titles hold content).
  *   - Session ids are random per tab session, never tied to a user id.
  *
  * Install: serve this file and add, in the app shell,
@@ -33,7 +37,9 @@
   var KEY = "vd_session";
   var state;
   try { state = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch (e) { state = null; }
-  if (!state) {
+  // Reuse saved state only if it has the shape we wrote (another script may own the key).
+  if (!state || typeof state.id !== "string" || !/^[0-9a-f]{32}$/.test(state.id) ||
+      typeof state.start !== "number" || typeof state.seq !== "number" || typeof state.on !== "boolean") {
     var id = "";
     var bytes = crypto.getRandomValues(new Uint8Array(16));
     bytes.forEach(function (b) { id += ("0" + b.toString(16)).slice(-2); });
@@ -59,7 +65,7 @@
     return parts.join(" > ");
   }
   function accName(el) {
-    if (el.closest && el.closest("[data-vd-mask]")) return null;
+    if (masked(el)) return null;
     var n = el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("alt");
     if (!n && el.labels && el.labels[0]) {
       // A wrapping <label> contains the control itself: drop it, or a <select>'s name would
@@ -71,12 +77,25 @@
     if (!n && /^(BUTTON|A|SUMMARY|OPTION|LABEL)$/.test(el.tagName)) n = el.textContent;
     return n ? n.replace(/\s+/g, " ").trim().slice(0, 60) : null;
   }
+  // data-vd-unmask re-exposes a harmless control inside a masked region (e.g. a Send button).
+  function masked(el) {
+    var m = el && el.closest && el.closest("[data-vd-mask]");
+    if (!m) return false;
+    var u = el.closest("[data-vd-unmask]");
+    return !(u && m.contains(u));
+  }
   // Locator hints in the order Playwright prefers: testid > role+name > id > css.
+  // Climb only to INTERACTIVE ancestors: a dialog/region/list's aria-label often holds
+  // content (a sheet labelled with the item's name) and must never become the target name.
+  var ACTIONABLE = "a,button,input,select,textarea,summary,label,[data-testid],[role=button],[role=link]," +
+    "[role=tab],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio],[role=option]," +
+    "[role=checkbox],[role=radio],[role=switch],[role=slider],[role=combobox],[role=treeitem]," +
+    "[role=textbox],[role=searchbox],[role=spinbutton],[role=listbox],[role=grid],[role=gridcell],[role=row]," +
+    "[contenteditable=''],[contenteditable=true]";
   function target(el) {
-    var act = el.closest ? el.closest("a,button,[role],input,select,textarea,summary,label,[data-testid]") || el : el;
+    var act = el.closest ? el.closest(ACTIONABLE) || el : el;
     // kiwifs: ids under [data-vd-mask] are content-derived (heading anchors), so drop them too.
-    var masked = act.closest && act.closest("[data-vd-mask]");
-    var id = !masked && act.id && !/\d{3,}|^[a-f0-9-]{16,}$/i.test(act.id) ? act.id : null; // skip generated ids
+    var id = !masked(act) && act.id && !/\d{3,}|^[a-f0-9-]{16,}$/i.test(act.id) ? act.id : null; // skip generated ids
     return {
       testid: act.getAttribute("data-testid"),
       role: act.getAttribute("role") || ({ A: "link", BUTTON: "button", SELECT: "combobox", TEXTAREA: "textbox" })[act.tagName] || null,
@@ -98,7 +117,15 @@
 
   // Route changes: full loads, SPA history API, hash routing.
   var lastPath = null;
-  function nav(kind) { var p = cleanPath(); if (p !== lastPath) { lastPath = p; push("nav", { data: { kind: kind, title: document.title.slice(0, 80) } }); } }
+  // No page title unless the app opts in: titles often carry content (project/note names).
+  function nav(kind) {
+    var p = cleanPath();
+    if (p === lastPath) return;
+    lastPath = p;
+    var data = { kind: kind };
+    if (cfg.captureTitle) data.title = document.title.slice(0, 80);
+    push("nav", { data: data });
+  }
   ["pushState", "replaceState"].forEach(function (m) {
     var orig = history[m];
     history[m] = function () { var r = orig.apply(this, arguments); setTimeout(function () { nav(m); }, 0); return r; };
@@ -109,7 +136,9 @@
 
   document.addEventListener("click", function (e) {
     var t = e.target; if (!t || t.nodeType !== 1) return;
-    push("click", { target: target(t), data: { x: Math.round(e.clientX / innerWidth * 100), y: Math.round(e.clientY / innerHeight * 100) } });
+    // No position inside a mask: on a visual picker (wheel, rating row) x/y reveals the choice.
+    var pos = masked(t) ? undefined : { x: Math.round(e.clientX / innerWidth * 100), y: Math.round(e.clientY / innerHeight * 100) };
+    push("click", { target: target(t), data: pos });
   }, true);
   document.addEventListener("change", function (e) {
     var el = e.target; if (!el || !el.tagName) return;
@@ -117,11 +146,13 @@
     if (/^(text|email|password|search|tel|url|number|textarea)$/.test(kind)) {
       push("input", { target: target(el), data: { kind: kind, length: (el.value || "").length } }); // never the value
     } else {
-      var v = el.hasAttribute("data-vd-capture-value") ? String(el.type === "checkbox" ? el.checked : el.value).slice(0, 60) : undefined;
+      var v = el.hasAttribute("data-vd-capture-value") && !masked(el) ? String(el.type === "checkbox" ? el.checked : el.value).slice(0, 60) : undefined;
       push("change", { target: target(el), data: { kind: kind, value: v } });
     }
   }, true);
-  document.addEventListener("submit", function (e) { push("submit", { target: target(e.target) }); }, true);
+  // A server-rendered POST unloads the page right away; flush now or the last batch (the
+  // submit itself) is often lost to pagehide.
+  document.addEventListener("submit", function (e) { push("submit", { target: target(e.target) }); flush(true); }, true);
 
   var maxDepth = 0, scrollTimer = null;
   addEventListener("scroll", function () {

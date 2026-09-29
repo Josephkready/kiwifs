@@ -37,6 +37,7 @@ import os
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import time
 import types
@@ -56,29 +57,45 @@ class Viewport:
     mobile: bool = False  # is_mobile + has_touch, so the app takes its touch/mobile branch
 
 
+# The screens the apps are actually used on (CSS px, at deviceScaleFactor 1 — layout is the
+# same as on the real high-DPI device, and 1x keeps recordings and judge cost down).
 VIEWPORTS = {
-    "mobile": Viewport("mobile", 375, 667, mobile=True),
-    "tablet": Viewport("tablet", 768, 1024, mobile=True),
-    "desktop": Viewport("desktop", 1440, 900),
-    "ultrawide": Viewport("ultrawide", 2560, 1440),
+    "iphone-13-pro": Viewport("iphone-13-pro", 390, 844, mobile=True),
+    "ipad-pro-11": Viewport("ipad-pro-11", 834, 1194, mobile=True),   # M1, portrait
+    "2k": Viewport("2k", 2560, 1440),
+    "4k": Viewport("4k", 3840, 2160),
+    "half-2k": Viewport("half-2k", 1280, 1440),                       # a window on half a 2K screen
+    "third-4k": Viewport("third-4k", 1280, 2160),                     # a window on a third of a 4K screen
 }
-VIDEO_MAX_EDGE = 1280  # judge cost scales with pixels; 1280 keeps ultrawide legible
+# Old generic names keep working in --viewports, and in flows' VIEWPORTS / MUST_FIT lists.
+ALIASES = {"mobile": "iphone-13-pro", "tablet": "ipad-pro-11", "desktop": "2k", "ultrawide": "4k"}
+# Judge cost scales with pixels. 1920 keeps text on a 4K recording legible (half scale);
+# the crisp full-size checkpoint screenshots are kept either way.
+VIDEO_MAX_EDGE = 1920
+
+
+def canonical(name: str) -> str:
+    return ALIASES.get(name, name)
 
 
 def parse_viewports(spec: str) -> list[Viewport]:
-    """'mobile,desktop' or 'all' or custom 'phone-se=320x568'."""
-    if spec == "all":
-        return list(VIEWPORTS.values())
+    """'mobile,desktop', 'all', custom 'phone-se=320x568', or mixed: 'all,kiosk=2560x1600'."""
     out = []
     for part in filter(None, (p.strip() for p in spec.split(","))):
-        if part in VIEWPORTS:
-            out.append(VIEWPORTS[part])
+        if part == "all":
+            out.extend(v for v in VIEWPORTS.values() if v not in out)
+            continue
+        if canonical(part) in VIEWPORTS:
+            if VIEWPORTS[canonical(part)] not in out:
+                out.append(VIEWPORTS[canonical(part)])
             continue
         m = re.fullmatch(r"(?:([\w-]+)=)?(\d+)x(\d+)", part)
         if not m:
             raise ValueError(f"unknown viewport {part!r} (presets: {', '.join(VIEWPORTS)}, or NAME=WxH)")
         w, h = int(m.group(2)), int(m.group(3))
-        out.append(Viewport(m.group(1) or f"{w}x{h}", w, h, mobile=w < 768))
+        vp = Viewport(m.group(1) or f"{w}x{h}", w, h, mobile=w < 768)
+        if vp not in out:
+            out.append(vp)
     return out
 
 
@@ -102,11 +119,14 @@ class Flow:
     viewports: list[str] | None
     run: types.FunctionType
     path: pathlib.Path
+    must_fit: bool | list[str] = False
+    setup: types.FunctionType | None = None
 
 
 def load_flows(flows_dir: pathlib.Path) -> list[Flow]:
     flows = []
-    # Flows import shared helpers (`from _helpers import ...`), so the flows dir must be importable.
+    # Flows are loaded by path, so put their dir on sys.path: `from _helpers import ...` in a
+    # flow must work (flows.md recommends shared helpers in flows/_helpers.py).
     if str(flows_dir.resolve()) not in sys.path:
         sys.path.insert(0, str(flows_dir.resolve()))
     for path in sorted(flows_dir.glob("*.py")):
@@ -124,6 +144,8 @@ def load_flows(flows_dir: pathlib.Path) -> list[Flow]:
             start=getattr(mod, "START", "/"),
             viewports=getattr(mod, "VIEWPORTS", None),
             run=mod.run,
+            must_fit=getattr(mod, "MUST_FIT", False),
+            setup=getattr(mod, "setup", None),
             path=path,
         ))
     names = [f.name for f in flows]
@@ -145,8 +167,10 @@ def select_flows(flows: list[Flow], patterns: list[str] | None) -> list[Flow]:
 class VD:
     """The handle a flow's run(page, vd) receives."""
 
-    def __init__(self, page, base_url: str, viewport: Viewport, out_dir: pathlib.Path, run_dir: pathlib.Path):
+    def __init__(self, page, base_url: str, viewport: Viewport, out_dir: pathlib.Path, run_dir: pathlib.Path,
+                 must_fit: bool = False):
         self.page, self.base_url, self.viewport = page, base_url, viewport
+        self.must_fit = must_fit  # flow's MUST_FIT: the page may not scroll at this viewport
         self._out, self._run_dir = out_dir, run_dir
         self._t0 = time.monotonic()
         self.frames: list[dict] = []
@@ -160,7 +184,8 @@ class VD:
         return self.page.goto(self.url(path), **kw)
 
     def settle(self, timeout_ms: int = 3000) -> None:
-        """Wait for network quiet + web fonts so a frame shows the settled layout."""
+        """Wait for network quiet, web fonts and running (finite) animations, so a checkpoint
+        shows the settled layout rather than a sheet half-way through closing."""
         try:
             self.page.wait_for_load_state("networkidle", timeout=timeout_ms)
         except Exception:
@@ -169,10 +194,23 @@ class VD:
             self.page.evaluate("document.fonts ? document.fonts.ready.then(() => true) : true")
         except Exception:
             pass
+        try:  # infinite animations (spinners, equalizers) never finish — only wait for finite ones
+            self.page.wait_for_function(
+                "() => document.getAnimations().every(a => a.playState !== 'running' || "
+                "!isFinite(a.effect && a.effect.getComputedTiming().endTime))", timeout=timeout_ms)
+        except Exception:
+            pass
         self.page.wait_for_timeout(150)
 
-    def mark(self, label: str, *, settle: bool = True, full_page: bool = False) -> None:
-        """Checkpoint: screenshot + DOM layout checks, stamped with video time."""
+    def mark(self, label: str, *, settle: bool = True, full_page: bool = False, show=None) -> None:
+        """Checkpoint: screenshot + DOM layout checks, stamped with video time.
+
+        show: a Locator to scroll into view first. On small viewports the state you are
+        marking (a log row, a toast, a panel below a big widget) is often off-screen — then
+        the screenshot AND the recording miss it.
+        """
+        if show is not None:
+            show.scroll_into_view_if_needed()
         if settle:
             self.settle()
         t = round(time.monotonic() - self._t0, 2)
@@ -185,11 +223,20 @@ class VD:
             hits = self.page.evaluate(LAYOUT_CHECKS_JS)
         except Exception as e:  # a navigating page can't be evaluated; record, don't die
             hits = [{"check": "checks-failed", "detail": str(e)[:200], "selector": None, "rect": None}]
+        if self.must_fit:  # kiosk / dashboard screens: everything must be visible without scrolling
+            try:
+                sh, ih = self.page.evaluate("[document.documentElement.scrollHeight, window.innerHeight]")
+                if sh > ih + 1:
+                    hits.append({"check": "below-fold", "selector": None, "rect": None,
+                                 "detail": f"page is {sh}px tall in a {ih}px viewport; {sh - ih}px needs scrolling"})
+            except Exception:
+                pass
         # A static defect hits at every mark; report it once, listing where it was seen.
         for h in hits:
             prior = self._seen.get((h["check"], h.get("selector")))
             if prior:
-                prior["frames"].append(label)
+                if prior["frames"][-1] != label:  # several pairs can hit one selector per mark
+                    prior["frames"].append(label)
                 continue
             h["frame"], h["t"], h["frames"] = label, t, [label]
             self._seen[(h["check"], h.get("selector"))] = h
@@ -212,20 +259,26 @@ def record_one(browser, flow: Flow, vp: Viewport, base_url: str, run_dir: pathli
     )
     ctx.set_default_timeout(step_timeout_ms)
     page = ctx.new_page()
-    vd = VD(page, base_url, vp, out, run_dir)
+    fit = flow.must_fit is True or (isinstance(flow.must_fit, (list, tuple))
+                                    and canonical(vp.name) in {canonical(v) for v in flow.must_fit})
+    vd = VD(page, base_url, vp, out, run_dir, must_fit=fit)
     console_errors: list[str] = []
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text[:300]))
     page.on("pageerror", lambda e: console_errors.append(f"pageerror: {str(e)[:300]}"))
     error = None
     started = time.monotonic()
     try:
+        if flow.setup is not None:  # e.g. reset server state / seed storage BEFORE the start mark
+            flow.setup(page, vd)
         if flow.start is not None:
             vd.goto(flow.start)
             vd.mark("start")
         flow.run(page, vd)
         vd.mark("end")
     except Exception as e:
-        error = f"{type(e).__name__}: {str(e).splitlines()[0][:300] if str(e) else ''}"
+        # Keep Playwright's call log (it names the locator that failed), not just line one.
+        lines = [ln.strip() for ln in str(e).splitlines() if ln.strip()]
+        error = f"{type(e).__name__}: {' | '.join(lines[:6])[:600]}"
         log(f"  FAILED: {error}")
         try:
             vd.mark("error", settle=False)
@@ -253,8 +306,19 @@ def record_one(browser, flow: Flow, vp: Viewport, base_url: str, run_dir: pathli
     }
 
 
+def run_reset(cmd: str, log=print) -> str | None:
+    """Run --reset-cmd (restores app state between recordings). Returns an error string or None."""
+    try:
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return f"reset-cmd timed out: {cmd}"
+    if proc.returncode != 0:
+        return f"reset-cmd exited {proc.returncode}: {(proc.stderr or proc.stdout).strip()[:300]}"
+    return None
+
+
 def record(flows: list[Flow], viewports: list[Viewport], base_url: str, out_root: pathlib.Path,
-           *, headed: bool = False, log=print) -> pathlib.Path:
+           *, headed: bool = False, log=print, reset_cmd: str | None = None) -> pathlib.Path:
     from playwright.sync_api import sync_playwright
 
     run_id = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -267,10 +331,17 @@ def record(flows: list[Flow], viewports: list[Viewport], base_url: str, out_root
         try:
             for flow in flows:
                 for vp in viewports:
-                    if flow.viewports and vp.name not in flow.viewports:
+                    if flow.viewports and canonical(vp.name) not in {canonical(v) for v in flow.viewports}:
                         continue
                     log(f"recording {flow.name} @ {vp.name} ({vp.width}x{vp.height})")
+                    # Every recording starts from the same app state: one server serves all
+                    # viewports, and a flow that saves data changes what the next one sees.
+                    reset_error = run_reset(reset_cmd, log) if reset_cmd else None
                     entry = record_one(browser, flow, vp, base_url, run_dir, log=log)
+                    entry["reset_error"] = reset_error
+                    if reset_error:  # state is unknown, so the recording can't be trusted: fail it
+                        log(f"  {reset_error}")
+                        entry["error"] = entry["error"] or f"state reset failed before this recording: {reset_error}"
                     report["runs"].append(entry)
                     log(f"  {len(entry['frames'])} frame(s), {len(entry['checks'])} check hit(s), {entry['duration_s']}s")
         finally:
@@ -362,7 +433,9 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("record", help="record flows (and judge with --judge)")
     r.add_argument("--base-url", default=os.environ.get("VDEBUG_BASE_URL"), help="app under test (or VDEBUG_BASE_URL)")
     r.add_argument("--flow", action="append", help="flow NAME or glob; repeatable (default: all)")
-    r.add_argument("--viewports", default="all", help="all | comma list of presets or NAME=WxH")
+    r.add_argument("--viewports", default="all", help="all | comma list of presets or NAME=WxH (e.g. all,kiosk=2560x1600)")
+    r.add_argument("--reset-cmd", help="shell command run before EVERY flow x viewport to restore app state "
+                                       "(e.g. reseed the fixture db); a failure marks that recording as errored")
     r.add_argument("--out", type=pathlib.Path, default=pathlib.Path("vdebug-runs"))
     r.add_argument("--headed", action="store_true")
     r.add_argument("--judge", action="store_true", help="send recordings to the multimodal judge on OpenRouter")
@@ -391,13 +464,13 @@ def main(argv: list[str] | None = None) -> int:
     if a.judge and not shutil.which("ffmpeg"):
         ap.error("--judge needs ffmpeg (it cuts each recording into frames)")
     run_dir = record(select_flows(flows, a.flow), parse_viewports(a.viewports), a.base_url, a.out,
-                     headed=a.headed, log=log)
+                     headed=a.headed, log=log, reset_cmd=a.reset_cmd)
     report = json.loads((run_dir / "report.json").read_text())
     if a.judge:
         sys.path.insert(0, str(HERE))
         import judge
         report = judge.judge_run(run_dir, model=a.model or os.environ.get("VDEBUG_MODEL", judge.DEFAULT_MODEL),
-                                 fps=a.fps, api_key=key, log=log)
+                                 fps=a.fps, api_key=key, log=log, notes=judge.load_notes(HERE / "judge_notes.md"))
     md = write_markdown(run_dir, report)
     print(md)
     return exit_code(report, a.fail_on)

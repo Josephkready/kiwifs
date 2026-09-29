@@ -19,6 +19,10 @@
 //	KIWIFS_VD_SAMPLE          fraction of browser sessions recorded, 0..1 (default 1)
 //	KIWIFS_VD_RETENTION_DAYS  prune sessions idle longer than this, in-process, at most
 //	                          once/24h (default 30); 0 or negative disables pruning
+//
+// A client can mint new session ids, so per-session/time-based limits aren't enough on
+// their own: MaxSessions/MaxEvents below are a hard, store-wide ceiling that refuses new
+// sessions once hit (existing sessions keep recording).
 package vdcapture
 
 import (
@@ -47,6 +51,11 @@ const (
 	MaxEventsPerBatch   = 500
 	MaxStr              = 200
 	MaxEventsPerSession = 5000
+	// A runaway client minting fresh session ids can't grow the store without bound
+	// either: store-wide ceilings (new sessions are refused once hit; existing
+	// sessions keep recording).
+	MaxSessions = 20_000
+	MaxEvents   = 1_000_000
 )
 
 var eventTypes = map[string]bool{
@@ -181,6 +190,16 @@ func (s *Store) Ingest(body []byte, userAgent string) (Result, error) {
 	err = tx.QueryRow("SELECT event_count FROM sessions WHERE id = ?", sid).Scan(&count)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
+		var nSessions, nEvents int64
+		if err := tx.QueryRow(
+			"SELECT (SELECT COUNT(*) FROM sessions), (SELECT COUNT(*) FROM events)",
+		).Scan(&nSessions, &nEvents); err != nil {
+			return res, err
+		}
+		if nSessions >= MaxSessions || nEvents >= MaxEvents {
+			res.Capped = true
+			return res, tx.Commit() // read-only so far; nothing to roll back
+		}
 		if _, err := tx.Exec(
 			"INSERT INTO sessions (id, started_at, last_seen_at, viewport_w, viewport_h, ua_class) VALUES (?, ?, ?, ?, ?, ?)",
 			sid, now, now, nullInt(vw), nullInt(vh), UAClass(userAgent, vw),

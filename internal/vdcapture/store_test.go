@@ -284,6 +284,68 @@ func TestIngestCapsEventsPerSession(t *testing.T) {
 	}
 }
 
+func TestRedactPathHashRoutingAndTrailingQueryKey(t *testing.T) {
+	cases := map[string]string{
+		"/a#/b?x=1": "/a#/b?x=", // hash-routed: the query after the fragment is stripped too
+		"/p?a=1&b":  "/p?a=&b=",
+	}
+	for in, want := range cases {
+		got := redactPath(&in)
+		if got == nil || *got != want {
+			t.Errorf("redactPath(%q) = %v, want %q", in, got, want)
+		}
+	}
+}
+
+func TestIngestRefusesNewSessionsOnceStoreWideCeilingHit(t *testing.T) {
+	st := openStore(t)
+	tx, err := st.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmt, err := tx.Prepare("INSERT INTO sessions (id, started_at, last_seen_at, ua_class, event_count) VALUES (?, 'x', 'x', 'desktop', 0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < MaxSessions; i++ {
+		if _, err := stmt.Exec(fmt.Sprintf("sid%08d________", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stmt.Close()
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	// A never-before-seen session id is refused once the store is at the ceiling.
+	res, err := st.Ingest(batchJSON(t, ev(0, "nav", nil)), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Stored != 0 || !res.Capped {
+		t.Fatalf("result = %+v, want a capped no-op for a brand new session", res)
+	}
+	var count int
+	if err := st.db.QueryRow("SELECT COUNT(*) FROM sessions WHERE id = ?", sid).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("session must not have been created, got %d row(s)", count)
+	}
+	// An EXISTING session (already counted) still records fine.
+	if _, err := st.db.Exec(
+		"INSERT INTO sessions (id, started_at, last_seen_at, ua_class, event_count) VALUES (?, 'x', 'x', 'desktop', 0)",
+		sid); err != nil {
+		t.Fatal(err)
+	}
+	res, err = st.Ingest(batchJSON(t, ev(0, "nav", nil)), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Stored != 1 {
+		t.Fatalf("existing session should still record, got %+v", res)
+	}
+}
+
 func TestIngestSessionRowUsesServerClockAndCoarseDevice(t *testing.T) {
 	st := openStore(t)
 	st.now = func() time.Time { return time.Date(2026, 9, 29, 12, 34, 56, 789, time.FixedZone("PDT", -7*3600)) }

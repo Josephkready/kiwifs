@@ -105,9 +105,10 @@ All PRs must pass the `test` CI check (go vet, go test, UI build) before merge.
 
 ## Visual QA (video-debugger)
 
-`vdebug/` records the reader's core journeys as video + checkpoint frames across a
-mobile/tablet/desktop/ultrawide matrix, runs DOM layout checks at every mark, and
-(with `--judge`) has a multimodal model on OpenRouter review the recording.
+`vdebug/` records the reader's core journeys as video + checkpoint frames across a real-device
+matrix (iPhone 13 Pro, iPad Pro 11", 2K, 4K, half-2K and third-4K windows — the old
+mobile/tablet/desktop/ultrawide names still work as aliases), runs DOM layout checks at every
+mark, and (with `--judge`) has a multimodal model on OpenRouter review the recording.
 
 ```bash
 make build                                   # or build ui/ + the Go binary however you like
@@ -120,6 +121,8 @@ python3 vdebug/vdebug.py record --base-url http://127.0.0.1:38417 --viewports al
 - Flows live in `vdebug/flows/*.py` (helpers in `_helpers.py`); use role/label/testid locators, never CSS classes.
 - **After changing anything under `ui/`**, re-record the flows that touch those screens before opening a PR.
 - Python tests: `cd vdebug && python3 -m pytest -q` (`-m "not live"` skips real-browser tests).
+- `vdebug/judge_notes.md` lists intentional design (scrollable overflow regions, the sticky
+  breadcrumb, the graph's force-layout settle, etc.) the judge must not flag as a bug.
 
 ### Flow capture (what the reader collects)
 
@@ -139,6 +142,9 @@ python3 vdebug/vdebug.py record --base-url http://127.0.0.1:38417 --viewports al
   (default 30) itself — once at startup, then at most once every 24h for as long as the process
   keeps running. Best-effort (a failed prune just logs). No host cron / systemd timer needed;
   set `KIWIFS_VD_RETENTION_DAYS` to 0 or a negative value to disable pruning entirely.
+- There's also a hard, store-wide ceiling (20k sessions / 1M events) independent of retention:
+  once hit, brand-new sessions are refused (a client minting fresh session ids can't grow the
+  store without bound), but sessions already recording keep going.
 - Inspect / mine / prune (same schema, `internal/vdcapture/schema.sql`):
   `python3 vdebug/capture/flowstore.py stats|mine|prune --db /var/lib/kiwifs/flows.db`
   (`mine --min-sessions 3 --out mined.json` → write `vdebug/flows/mined_<id>.py` → `promote`;
