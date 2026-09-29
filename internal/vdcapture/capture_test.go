@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/time/rate"
@@ -163,6 +164,53 @@ func TestFromEnvIgnoresInvalidTuning(t *testing.T) {
 	defer c.Close()
 	if !strings.Contains(c.ScriptTag(), `data-sample="1"`) {
 		t.Fatalf("sample should default to 1, tag = %s", c.ScriptTag())
+	}
+}
+
+func TestStartRetentionPrunesInProcess(t *testing.T) {
+	st := openStore(t)
+	stale := time.Now().UTC().Add(-31*24*time.Hour).Format("2006-01-02T15:04:05") + "+00:00"
+	if _, err := st.db.Exec(
+		"INSERT INTO sessions (id, started_at, last_seen_at, ua_class) VALUES (?, ?, ?, 'desktop')",
+		sid, stale, stale,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	c := New(st, 1)
+	defer c.Close()
+	c.StartRetention(30)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var count int
+		if err := st.db.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("retention did not prune the stale session within the deadline")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestStartRetentionDisabledForNonPositiveDays(t *testing.T) {
+	c := New(openStore(t), 1)
+	c.StartRetention(0)
+	// No background loop should have been started; Close must return promptly
+	// rather than blocking on a WaitGroup for a goroutine that never ran.
+	done := make(chan struct{})
+	go func() {
+		c.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Close blocked — StartRetention(0) must not start the loop")
 	}
 }
 

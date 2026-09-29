@@ -151,20 +151,57 @@ function darkSelector(): string {
   return scope ? `.dark ${scope}` : ".dark";
 }
 
+/**
+ * Toggling `.dark` swings many elements between very different backgrounds
+ * and foregrounds at once. `transition-colors` interpolates each element's
+ * background/foreground independently, so for a frame or two some controls
+ * land on a washed-out intermediate color while a sibling's text has already
+ * jumped to its final value — a visible "blank bar" / invisible-text flash.
+ * Suppress all color transitions for the single frame around the class flip
+ * so the swap is instant instead of passing through that mismatched state.
+ */
+let suppressStyleEl: HTMLStyleElement | null = null;
+
+export function withoutColorTransitions(flip: () => void): void {
+  if (typeof document === "undefined") {
+    flip();
+    return;
+  }
+  // Reuse one <style> tag across rapid back-to-back flips (e.g. a toggle
+  // double-click, or a manual toggle racing a prefers-color-scheme change)
+  // instead of appending a new one each time and leaving several scheduled
+  // for removal at once.
+  if (!suppressStyleEl) {
+    suppressStyleEl = document.createElement("style");
+    suppressStyleEl.textContent = "*, *::before, *::after { transition: none !important; }";
+    document.head.appendChild(suppressStyleEl);
+  }
+  flip();
+  // Force layout so the flip is committed under the suppression rule before
+  // it's lifted on the next frame.
+  void document.documentElement.offsetHeight;
+  requestAnimationFrame(() => {
+    suppressStyleEl?.remove();
+    suppressStyleEl = null;
+  });
+}
+
 function applyMode(mode: KiwiThemeOverrides["mode"]): void {
   if (!mode) return;
   // When scoped, the cloud ThemeProvider owns dark/light — skip direct DOM changes.
   if (getScopeSelector()) return;
   const root = document.documentElement;
-  if (mode === "dark") {
-    root.classList.add("dark");
-  } else if (mode === "light") {
-    root.classList.remove("dark");
-  } else {
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    if (prefersDark) root.classList.add("dark");
-    else root.classList.remove("dark");
-  }
+  withoutColorTransitions(() => {
+    if (mode === "dark") {
+      root.classList.add("dark");
+    } else if (mode === "light") {
+      root.classList.remove("dark");
+    } else {
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      if (prefersDark) root.classList.add("dark");
+      else root.classList.remove("dark");
+    }
+  });
 }
 
 export function applyKiwiTheme(overrides: KiwiThemeOverrides): void {

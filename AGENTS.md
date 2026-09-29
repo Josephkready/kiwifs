@@ -135,10 +135,14 @@ python3 vdebug/vdebug.py record --base-url http://127.0.0.1:38417 --viewports al
   inside `--root` is refused (it would be public via `/raw/*`). If the db can't be opened, capture
   switches itself off and the app runs normally.
 - `KIWIFS_VD_CAPTURE=0` disables capture; `KIWIFS_VD_SAMPLE=0..1` sets the fraction of sessions recorded.
-- Retention is a host job: run `flowstore.py prune --db <db> --days 30` daily (e.g. a systemd timer).
+- Retention is in-process: `kiwifs serve` prunes sessions idle longer than `KIWIFS_VD_RETENTION_DAYS`
+  (default 30) itself — once at startup, then at most once every 24h for as long as the process
+  keeps running. Best-effort (a failed prune just logs). No host cron / systemd timer needed;
+  set `KIWIFS_VD_RETENTION_DAYS` to 0 or a negative value to disable pruning entirely.
 - Inspect / mine / prune (same schema, `internal/vdcapture/schema.sql`):
   `python3 vdebug/capture/flowstore.py stats|mine|prune --db /var/lib/kiwifs/flows.db`
-  (`mine --min-sessions 3 --out mined.json` → write `vdebug/flows/mined_<id>.py` → `promote`).
+  (`mine --min-sessions 3 --out mined.json` → write `vdebug/flows/mined_<id>.py` → `promote`;
+  `prune` still works standalone for a one-off cleanup, it just isn't required for routine retention).
 
 ## What NOT To Do
 

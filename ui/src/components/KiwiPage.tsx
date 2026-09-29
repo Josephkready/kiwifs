@@ -591,9 +591,11 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                 <Button size="sm" onClick={() => nav("")} className="gap-2">
                   Go to index
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => nav(path)} className="gap-2">
-                  <Plus className="h-3.5 w-3.5" /> Create this page
-                </Button>
+                {features.edit && (
+                  <Button variant="outline" size="sm" onClick={() => nav(path)} className="gap-2">
+                    <Plus className="h-3.5 w-3.5" /> Create this page
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -760,8 +762,16 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                   <Badge
                     key={b.value}
                     variant="secondary"
-                    className="cursor-pointer hover:bg-primary/20 transition-colors gap-1"
+                    className="cursor-pointer hover:bg-primary/20 transition-colors gap-1 py-1"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => onTagClick?.(b.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onTagClick?.(b.value);
+                      }
+                    }}
                   >
                     <Tag className="h-3 w-3" />
                     {b.value}
@@ -1287,7 +1297,7 @@ export function FrontmatterProperties({
           setCollapsed(next);
           writeCollapsePref(LS_PROPERTIES, next);
         }}
-        className="mb-2 flex w-full items-center gap-1.5 text-sm font-semibold text-foreground/80 hover:text-foreground transition-colors"
+        className="mb-2 flex min-h-6 w-full items-center gap-1.5 py-0.5 text-sm font-semibold text-foreground/80 hover:text-foreground transition-colors"
       >
         {collapsed
           ? <ChevronRight className="h-4 w-4 shrink-0" />

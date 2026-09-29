@@ -181,7 +181,7 @@ export function CodeRunner({ source, lang }: Props) {
         <div className="flex items-center gap-2">
           <button
             onClick={handleCopy}
-            className="inline-flex items-center text-muted-foreground/50 hover:text-foreground transition-colors"
+            className="inline-flex items-center p-[5px] -m-[5px] text-muted-foreground/50 hover:text-foreground transition-colors"
             aria-label="Copy code"
             title="Copy"
           >
