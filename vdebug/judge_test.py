@@ -301,3 +301,22 @@ def test_extract_frames_reports_empty_extraction(monkeypatch, tmp_path):
 def test_judge_entry_contains_bad_max_frames(entry, tmp_path):
     out = judge.judge_entry(entry, tmp_path, model="m/x", api_key="k", max_frames=1)
     assert "max_frames" in out["error"] and out["findings"] == []
+
+
+def test_notes_file_is_sent_as_intentional_design(entry, tmp_path):
+    assert judge.load_notes(tmp_path / "missing.md") is None and judge.load_notes(None) is None
+    (tmp_path / "judge_notes.md").write_text("The column is 468px wide on purpose.\n")
+    notes = judge.load_notes(tmp_path / "judge_notes.md")
+    intro = judge.build_messages(entry, [], notes)[1]["content"][0]["text"]
+    assert "intentional design" in intro and "468px wide on purpose" in intro
+    assert "Project notes" not in judge.build_messages(entry, [])[1]["content"][0]["text"]
+    (tmp_path / "bad.md").write_bytes(b"\xff\xfe not utf-8 \xff")
+    assert judge.load_notes(tmp_path / "bad.md") is None          # warns, never raises
+    (tmp_path / "big.md").write_text("x" * 10000)
+    assert len(judge.load_notes(tmp_path / "big.md")) == judge.NOTES_MAX
+
+
+def test_prompt_rules_cover_known_false_positives():
+    p = judge.SYSTEM_PROMPT
+    assert "blank white browser page" in p and "video-encoding artifact" in p and "automated test that scrolls" in p
+    assert "below the fold" in p and "narrow, centred column" in p and "trust" in p and "Project notes" in p

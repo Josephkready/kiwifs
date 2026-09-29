@@ -155,3 +155,73 @@ def test_cli_promote_and_prune(tmp_path, capsys):
     s.close()
     assert main(["prune", "--db", str(db), "--days", "30"]) == 0
     assert "pruned 2 session(s)" in capsys.readouterr().out
+
+
+def test_session_id_must_be_ascii(store):
+    with pytest.raises(BatchError):
+        store.ingest(batch([ev(0, "nav")], sid="ａｂｃｄｅｆｇｈ12"))   # full-width letters pass isalnum()
+
+
+def test_open_creates_parent_dir_and_applies_schema_once(tmp_path, monkeypatch):
+    import flowstore
+    db = tmp_path / "deep" / "er" / "flows.db"
+    FlowStore(db).close()
+    assert db.exists()
+    reads = []
+    real = flowstore.SCHEMA.read_text
+    monkeypatch.setattr(flowstore, "SCHEMA", type("S", (), {"read_text": lambda self: reads.append(1) or real()})())
+    FlowStore(db).close()
+    assert reads == []  # tables exist: schema not re-applied
+    db.unlink()         # deleted and recreated while the process keeps running
+    s = FlowStore(db)
+    assert s.ingest(batch([ev(0, "nav")])) == 1 and reads == [1]
+    s.close()
+
+
+def test_lazy_prune_runs_at_most_once_per_interval(tmp_path, monkeypatch):
+    import flowstore
+    db = tmp_path / "flows.db"
+    s = FlowStore(db)
+    s.ingest(batch([ev(0, "nav")]))
+    s.db.execute("UPDATE sessions SET last_seen_at = '2000-01-01T00:00:00+00:00'")
+    s.db.commit()
+    s.close()
+    FlowStore(db, prune_days=30).close()               # first open prunes
+    s = FlowStore(db)
+    assert s.stats()["sessions"] == 0
+    s.ingest(batch([ev(0, "nav")], sid="bbbbbbbb00000000"))
+    s.db.execute("UPDATE sessions SET last_seen_at = '2000-01-01T00:00:00+00:00'")
+    s.db.commit()
+    s.close()
+    FlowStore(db, prune_days=30).close()               # within the interval: no prune
+    s = FlowStore(db)
+    assert s.stats()["sessions"] == 1
+    s.close()
+    monkeypatch.setitem(flowstore._last_prune, str(db), -10 * flowstore.PRUNE_INTERVAL_S)
+    FlowStore(db, prune_days=30).close()               # interval elapsed: prunes again
+    s = FlowStore(db)
+    assert s.stats()["sessions"] == 0
+    s.close()
+
+
+def test_server_strips_query_values_even_if_client_did_not(store):
+    store.ingest(batch([ev(0, "nav", path="/search?q=my+secret&page=2"), ev(1, "nav", path="/a?")]))
+    assert [e["path"] for e in store.session_events(SID)] == ["/search?q=&page=", "/a"]
+
+
+@pytest.mark.parametrize("path,want", [
+    ("/a#/b?x=1", "/a#/b?x="),            # hash-routed: the query after the fragment is stripped too
+    ("/p?a=1&b", "/p?a=&b="),
+])
+def test_clean_path_edge_cases(store, path, want):
+    store.ingest(batch([ev(0, "nav", path=path)]))
+    assert store.session_events(SID)[0]["path"] == want
+
+
+def test_store_wide_ceiling_refuses_new_sessions(store, monkeypatch):
+    import flowstore
+    monkeypatch.setattr(flowstore, "MAX_SESSIONS", 1)
+    assert store.ingest(batch([ev(0, "nav")])) == 1
+    assert store.ingest(batch([ev(0, "nav")], sid="cccccccc00000000")) == 0
+    assert store.last_ingest["capped"] is True
+    assert store.ingest(batch([ev(1, "click")])) == 1       # the existing session still records

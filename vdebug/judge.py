@@ -125,11 +125,25 @@ Rules:
   two frames of a transition. Record a verdict for each frame in frames_reviewed.
 - Report only what is VISIBLE in the frames. Do not invent bugs to seem thorough; an empty
   findings list is a valid, good answer for a clean flow.
+- Not defects — never report these: the blank white browser page, or the page before its
+  images/background have loaded, in the first frame(s) (every recording starts with a cold cache); a single frame that is uniformly soft/blurry across the WHOLE screen
+  (a video-encoding artifact); the page scrolling so the next control is in view (the flow is
+  driven by an automated test that scrolls to what it clicks). A layout shift is content moving
+  WITHOUT such a scroll. Content that simply continues below the fold of a scrollable page is
+  not "clipped" or "cut off". A deliberately narrow, centred column on wide screens is a design
+  choice, not a defect, unless its content is cramped or cut. A toast/snackbar or docked bar
+  over content while it's shown is by design; report it only if it hides what the user needs,
+  lingers far too long, or looks gone but still intercepts taps.
+- The flow description says what the test script does. If the frames disagree with it, trust
+  the frames; report a defect only when the APP visibly misbehaves, not because the description
+  was incomplete.
+- Project notes, when given, describe intentional design. Never report what they describe.
 - You are also given automated DOM check hits, measured at named checkpoints (times given).
   Confirm each one you can see (set confirms_check to its id) and silently ignore ones that
   look fine; they are hints, not truth.
 - Severity: critical = blocks the flow or hides content; major = clearly broken, looks unprofessional;
-  minor = polish.
+  minor = polish. A glitch visible for only a frame or two of a transition (ghosting, a blank
+  flash) is minor unless it hides or garbles content the user needs.
 - One finding per distinct defect; cite the first frame that shows it.
 Return JSON matching the schema."""
 
@@ -177,14 +191,29 @@ def extract_frames(video: pathlib.Path, out_dir: pathlib.Path, *, fps: int = DEF
              "candidates": candidates} for p in paths]
 
 
-def build_messages(entry: dict, frames: list[dict]) -> list[dict]:
+NOTES_MAX = 4000
+
+
+def load_notes(path: pathlib.Path | None) -> str | None:
+    """The repo's judge_notes.md (intentional design the judge must not flag), if present."""
+    if path is None or not pathlib.Path(path).is_file():
+        return None
+    try:
+        text = pathlib.Path(path).read_text().strip()
+    except (OSError, UnicodeDecodeError) as e:  # a bad notes file must never lose a recorded run
+        print(f"WARNING: ignoring unreadable judge notes {path}: {e}", file=sys.stderr)
+        return None
+    return text[:NOTES_MAX] or None
+
+
+def build_messages(entry: dict, frames: list[dict], notes: str | None = None) -> list[dict]:
     """The chat messages for one flow × viewport entry. Pure; no network, no ffmpeg."""
     checks = [
         {"id": f"c{i}", "check": c["check"], "seen_at": c.get("frames") or [c.get("frame")],
          "selector": c.get("selector"), "detail": c.get("detail")}
         for i, c in enumerate(entry.get("checks", []))
     ]
-    marks = ", ".join("%s @ %.1fs" % (f["label"], f["t"]) for f in entry.get("frames", []))
+    marks = ", ".join("{} @ {:.1f}s".format(f["label"], f["t"]) for f in entry.get("frames", []))
     intro = (
         f"Flow: {entry['flow']} — {entry.get('description', '')}\n"
         f"Viewport: {entry['viewport']} ({entry['width']}x{entry['height']} CSS px)\n"
@@ -192,6 +221,8 @@ def build_messages(entry: dict, frames: list[dict]) -> list[dict]:
         f"Named checkpoints: {marks or 'none'}\n"
         f"Automated DOM check hits (hints, seen_at = checkpoint names): {json.dumps(checks) if checks else 'none'}"
     )
+    if notes:
+        intro += f"\nProject notes (intentional design — do not report these):\n{notes}"
     if entry.get("error"):
         intro += f"\nThe flow script FAILED: {entry['error']} (the last frames show the failure state)."
     content: list[dict] = [{"type": "text", "text": intro}]
@@ -224,7 +255,7 @@ def coverage(result: dict, frames: list[dict]) -> dict:
     labels = [f["label"] for f in frames]
     reviewed = {str(fr.get("frame", "")).strip().strip("'\"").lower() for fr in result.get("frames_reviewed", [])
                 if isinstance(fr, dict)}
-    missing = [l for l in labels if l.lower() not in reviewed]
+    missing = [label for label in labels if label.lower() not in reviewed]
     return {"frames": len(labels), "reviewed": len(labels) - len(missing), "missing": missing}
 
 
@@ -233,7 +264,7 @@ def parse_response(body: dict) -> dict:
     try:
         text = body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
-        raise ValueError(f"no message in response: {json.dumps(body)[:300]}")
+        raise ValueError(f"no message in response: {json.dumps(body)[:300]}") from None
     if isinstance(text, list):  # some providers return content parts
         text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
     text = (text or "").strip()
@@ -244,7 +275,7 @@ def parse_response(body: dict) -> dict:
     except json.JSONDecodeError:
         start, end = text.find("{"), text.rfind("}")
         if start < 0 or end <= start:
-            raise ValueError(f"response is not JSON: {text[:300]}")
+            raise ValueError(f"response is not JSON: {text[:300]}") from None
         out = json.loads(text[start:end + 1])
     if not isinstance(out, dict) or not isinstance(out.get("findings"), list):
         raise ValueError("response JSON lacks a findings list")
@@ -311,7 +342,7 @@ def _complete(model: str, messages: list[dict], api_key: str) -> tuple[dict, dic
 
 def judge_entry(entry: dict, run_dir: pathlib.Path, *, model: str, api_key: str,
                 fps: int = DEFAULT_FPS, max_frames: int = MAX_FRAMES,
-                film_dir: pathlib.Path | None = None) -> dict:
+                film_dir: pathlib.Path | None = None, notes: str | None = None) -> dict:
     """Judge one flow × viewport. Never raises for model/ffmpeg trouble — returns {'error': ...}.
 
     Frames are cut into `film_dir` (default: <flow>/<viewport>/film/ beside the video) and
@@ -323,7 +354,7 @@ def judge_entry(entry: dict, run_dir: pathlib.Path, *, model: str, api_key: str,
             raise RuntimeError("no video recorded for this flow")
         video = run_dir / entry["video"]
         frames = extract_frames(video, film_dir or video.parent / "film", fps=fps, max_frames=max_frames)
-        result, usage = _complete(model, build_messages(entry, frames), api_key)
+        result, usage = _complete(model, build_messages(entry, frames, notes), api_key)
         result["cost_usd"] = usage_cost(usage)
         result["tokens"] = {
             "prompt": usage.get("prompt_tokens") or 0,
@@ -343,16 +374,17 @@ def judge_entry(entry: dict, run_dir: pathlib.Path, *, model: str, api_key: str,
 
 
 def judge_run(run_dir: pathlib.Path, *, model: str, api_key: str, fps: int = DEFAULT_FPS,
-              log=print, workers: int = 6) -> dict:
+              log=print, workers: int = 6, notes: str | None = None) -> dict:
     """Judge every entry in <run_dir>/report.json (concurrently) and rewrite it in place."""
     report_path = run_dir / "report.json"
     report = json.loads(report_path.read_text())
     runs = report["runs"]
     log(f"judging {len(runs)} flow x viewport recording(s) with {model} (video frames @ {fps} fps, deduped) ...")
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(runs)))) as pool:
-        results = list(pool.map(lambda e: judge_entry(e, run_dir, model=model, api_key=api_key, fps=fps), runs))
+        results = list(pool.map(lambda e: judge_entry(e, run_dir, model=model, api_key=api_key, fps=fps,
+                                                      notes=notes), runs))
     total = 0.0
-    for entry, j in zip(runs, results):
+    for entry, j in zip(runs, results, strict=False):
         entry["judge"] = j
         where = f"  {entry['flow']} @ {entry['viewport']}:"
         if j.get("error"):
@@ -378,14 +410,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("run_dir", type=pathlib.Path)
     ap.add_argument("--model", default=os.environ.get("VDEBUG_MODEL", DEFAULT_MODEL))
     ap.add_argument("--fps", type=int, default=DEFAULT_FPS, help="video sampling rate before dedup (default 10)")
+    ap.add_argument("--notes", type=pathlib.Path, default=pathlib.Path(__file__).resolve().with_name("judge_notes.md"),
+                    help="intentional-design notes for the judge (default: judge_notes.md beside judge.py)")
     a = ap.parse_args(argv)
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         print("OPENROUTER_API_KEY is not set", file=sys.stderr)
         return 2
-    report = judge_run(a.run_dir, model=a.model, api_key=key, fps=a.fps, log=lambda m: print(m, file=sys.stderr))
+    report = judge_run(a.run_dir, model=a.model, api_key=key, fps=a.fps, log=lambda m: print(m, file=sys.stderr),
+                       notes=load_notes(a.notes))
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-    from vdebug import write_markdown  # noqa: E402  (sibling module; avoids a cycle at import time)
+    from vdebug import (
+        write_markdown,  # noqa: E402  (sibling module; avoids a cycle at import time)
+    )
     write_markdown(a.run_dir, report)
     print(a.run_dir / "report.md")
     return 0

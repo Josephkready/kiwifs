@@ -47,6 +47,10 @@ const (
 	MaxEventsPerBatch   = 500
 	MaxStr              = 200
 	MaxEventsPerSession = 5000
+	// ...and minting fresh session ids can't either: store-wide ceilings (new
+	// sessions are refused once hit; existing sessions keep recording).
+	MaxSessions = 20_000
+	MaxEvents   = 1_000_000
 )
 
 var eventTypes = map[string]bool{
@@ -181,6 +185,16 @@ func (s *Store) Ingest(body []byte, userAgent string) (Result, error) {
 	err = tx.QueryRow("SELECT event_count FROM sessions WHERE id = ?", sid).Scan(&count)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
+		var nSessions, nEvents int64
+		if err := tx.QueryRow(
+			"SELECT (SELECT COUNT(*) FROM sessions), (SELECT COUNT(*) FROM events)",
+		).Scan(&nSessions, &nEvents); err != nil {
+			return res, err
+		}
+		if nSessions >= MaxSessions || nEvents >= MaxEvents {
+			res.Capped = true
+			return res, tx.Commit() // read-only so far; nothing to roll back
+		}
 		if _, err := tx.Exec(
 			"INSERT INTO sessions (id, started_at, last_seen_at, viewport_w, viewport_h, ua_class) VALUES (?, ?, ?, ?, ?, ?)",
 			sid, now, now, nullInt(vw), nullInt(vh), UAClass(userAgent, vw),
