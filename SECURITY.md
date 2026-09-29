@@ -84,6 +84,23 @@ Every write is a git commit with SHA-1 content addressing. The commit chain is t
 
 ---
 
+### Usage flow capture
+
+`kiwifs serve` records how the web UI is used, so UI tests can follow real user paths. The
+recorder (`/_vd/recorder.js`) posts intent events (route changes, clicks, submits, scroll depth,
+JS errors) to `POST /api/_vd/events`, stored in a separate SQLite db.
+
+- **Never stored:** input values, query-string values, the raw user agent, user ids or cookies,
+  note paths (`/page/<path>` becomes `/page/:path`), page titles, or labels inside the note body,
+  sidebar tree and search results. Automated browsers record nothing.
+- **Where:** `KIWIFS_VD_FLOWS_DB` (default `/var/lib/kiwifs/flows.db`). A path inside `--root` is
+  refused, since `/raw/*` would serve it. Sessions idle for `KIWIFS_VD_RETENTION_DAYS` (default 30)
+  are deleted daily.
+- **Turn it off:** `KIWIFS_VD_CAPTURE=0`, or sample with `KIWIFS_VD_SAMPLE=0..1`. If the db can't
+  be opened, capture turns itself off and KiwiFS runs normally.
+- The ingest endpoint is unauthenticated and rate-limited to 20 batches/s per process; also cap it
+  at your reverse proxy if KiwiFS is internet-facing.
+
 ## Dependencies
 
 KiwiFS is built in Go with minimal dependencies. The binary is statically linked. SQLite is pure Go (no CGo). Security-critical dependencies:

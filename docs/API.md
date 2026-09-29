@@ -22,6 +22,7 @@ For the full interactive API reference, see [docs.kiwifs.com/api-reference](http
 - [Sharing](#sharing)
 - [Import and Export](#import-and-export)
 - [Headers](#headers)
+- [Usage flow capture](#usage-flow-capture)
 
 ---
 
@@ -237,3 +238,16 @@ PUT /api/kiwi/{space}/file?path=...
 ```
 
 Each space has its own root directory, git repo, and search index.
+
+---
+
+## Usage flow capture
+
+Unauthenticated by design (outside the `/api/kiwi` auth group). Stores route shapes and
+clicked-control hints only, never content. See [SECURITY.md](../SECURITY.md#usage-flow-capture).
+
+```
+GET  /_vd/recorder.js     → the recorder script (injected into the web UI only when capture is on)
+POST /api/_vd/events      ← {"session_id", "viewport", "events": [...]}
+                          → 204 stored or capture off · 400 malformed · 413 > 256 KB · 429 over 20 batches/s
+```

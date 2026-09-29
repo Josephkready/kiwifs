@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
+	"golang.org/x/time/rate"
 )
 
 func serve(c *Capture, body string) *httptest.ResponseRecorder {
@@ -138,5 +139,42 @@ func TestInsideRoot(t *testing.T) {
 		if got := insideRoot(c.path, c.root); got != c.want {
 			t.Errorf("insideRoot(%s, %s) = %v", c.path, c.root, got)
 		}
+	}
+}
+
+func TestHandleEventsRateLimited(t *testing.T) {
+	c := New(openStore(t), 1)
+	c.limiter = rate.NewLimiter(0, 2) // burst of 2, never refills
+	good := `{"session_id":"` + sid + `","events":[{"seq":0,"t":0,"type":"nav"}]}`
+	codes := []int{serve(c, good).Code, serve(c, good).Code, serve(c, good).Code}
+	if codes[0] != http.StatusNoContent || codes[1] != http.StatusNoContent || codes[2] != http.StatusTooManyRequests {
+		t.Fatalf("codes = %v, want [204 204 429]", codes)
+	}
+}
+
+func TestFromEnvIgnoresInvalidTuning(t *testing.T) {
+	t.Setenv(EnvCapture, "")
+	t.Setenv(EnvFlowsDB, filepath.Join(t.TempDir(), "flows.db"))
+	t.Setenv(EnvSample, "lots")
+	t.Setenv(EnvDays, "-3")
+	c := FromEnv(t.TempDir())
+	if c == nil {
+		t.Fatal("invalid tuning values must fall back to defaults, not disable capture")
+	}
+	defer c.Close()
+	if !strings.Contains(c.ScriptTag(), `data-sample="1"`) {
+		t.Fatalf("sample should default to 1, tag = %s", c.ScriptTag())
+	}
+}
+
+func TestDefaultRoundTrip(t *testing.T) {
+	t.Cleanup(func() { SetDefault(nil) })
+	if Default() != nil {
+		t.Fatal("no capture installed by default")
+	}
+	c := New(openStore(t), 1)
+	SetDefault(c)
+	if Default() != c {
+		t.Fatal("SetDefault/Default round trip failed")
 	}
 }

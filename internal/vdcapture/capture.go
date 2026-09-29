@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"golang.org/x/time/rate"
 )
 
 //go:embed recorder.js
@@ -25,8 +26,15 @@ const (
 	// EventsPath receives recorder.js batches; RecorderPath serves the script.
 	EventsPath   = "/api/_vd/events"
 	RecorderPath = "/_vd/recorder.js"
-	// MaxBody caps one batch; 500 events of capped strings fit comfortably.
+	// MaxBody caps one request. recorder.js flushes at most 50 events per batch
+	// (maxBatch), far below this; a full MaxEventsPerBatch of maximal-length
+	// strings would not fit and is answered 413.
 	MaxBody = 256_000
+	// IngestPerSecond / IngestBurst bound the unauthenticated endpoint for the
+	// whole process, independent of the optional global [server.rate_limit].
+	// A real tab sends about one batch per 5 s.
+	IngestPerSecond = 20
+	IngestBurst     = 200
 
 	EnvCapture = "KIWIFS_VD_CAPTURE"        // "0"/"false"/"off"/"no" disables capture
 	EnvFlowsDB = "KIWIFS_VD_FLOWS_DB"       // SQLite path; must be a state path, never under --root
@@ -38,10 +46,12 @@ const (
 // Capture is the process-wide capture switch. A nil or disabled Capture serves
 // no script tag and answers every ingest with 204, so the app never notices.
 type Capture struct {
-	store  *Store
-	sample float64
-	logged atomic.Int64
-	stop   chan struct{}
+	store   *Store
+	sample  float64
+	limiter *rate.Limiter
+	stop    chan struct{}
+	// One log budget per message class, so a flood of one kind can't mute another.
+	logRejected, logDropped, logFailed, logLimited atomic.Int64
 }
 
 // FromEnv opens capture per the env vars. Any failure (unwritable state dir,
@@ -84,7 +94,8 @@ func FromEnv(servedRoot string) *Capture {
 		}
 	}
 	log.Printf("vdcapture: recording user flows into %s (sample=%g, retention=%dd)", path, sample, days)
-	c := &Capture{store: st, sample: sample, stop: make(chan struct{})}
+	c := New(st, sample)
+	c.stop = make(chan struct{})
 	go c.pruneLoop(days, 24*time.Hour)
 	return c
 }
@@ -95,7 +106,7 @@ func (c *Capture) pruneLoop(days int, every time.Duration) {
 	defer t.Stop()
 	for {
 		if n, err := c.store.Prune(days); err != nil {
-			c.rateLog("vdcapture: prune failed: %v", err)
+			c.rateLog(&c.logFailed, "vdcapture: prune failed: %v", err)
 		} else if n > 0 {
 			log.Printf("vdcapture: pruned %d session(s) idle > %dd", n, days)
 		}
@@ -108,7 +119,9 @@ func (c *Capture) pruneLoop(days int, every time.Duration) {
 }
 
 // New wraps an open store; used by tests and embedders.
-func New(st *Store, sample float64) *Capture { return &Capture{store: st, sample: sample} }
+func New(st *Store, sample float64) *Capture {
+	return &Capture{store: st, sample: sample, limiter: rate.NewLimiter(IngestPerSecond, IngestBurst)}
+}
 
 func (c *Capture) Enabled() bool { return c != nil && c.store != nil && c.sample > 0 }
 
@@ -139,11 +152,16 @@ func ServeRecorder(ctx echo.Context) error {
 }
 
 // HandleEvents ingests one batch. 204 on success, 400 on a malformed batch,
-// 413 when oversized. Storage failures are logged and swallowed (204): the
-// recorder never surfaces errors, and capture must never break the app.
+// 413 when oversized, 429 over the process-wide ingest rate. Storage failures
+// are logged and swallowed (204): the recorder never surfaces errors, and
+// capture must never break the app.
 func (c *Capture) HandleEvents(ctx echo.Context) error {
 	if !c.Enabled() {
 		return ctx.NoContent(http.StatusNoContent)
+	}
+	if c.limiter != nil && !c.limiter.Allow() {
+		c.rateLog(&c.logLimited, "vdcapture: ingest rate limit (%d/s) exceeded, dropping batches", IngestPerSecond)
+		return ctx.NoContent(http.StatusTooManyRequests)
 	}
 	req := ctx.Request()
 	body, err := io.ReadAll(io.LimitReader(req.Body, MaxBody+1))
@@ -157,21 +175,22 @@ func (c *Capture) HandleEvents(ctx echo.Context) error {
 	var be *BatchError
 	switch {
 	case errors.As(err, &be):
+		c.rateLog(&c.logRejected, "vdcapture: rejected batch: %v", be)
 		return ctx.NoContent(http.StatusBadRequest)
 	case err != nil:
-		c.rateLog("vdcapture: ingest failed: %v", err)
+		c.rateLog(&c.logFailed, "vdcapture: ingest failed: %v", err)
 		return ctx.NoContent(http.StatusNoContent)
 	}
 	if res.Invalid > 0 || res.Capped {
-		c.rateLog("vdcapture: dropped %d invalid event(s), capped=%v", res.Invalid, res.Capped)
+		c.rateLog(&c.logDropped, "vdcapture: dropped %d invalid event(s), capped=%v", res.Invalid, res.Capped)
 	}
 	return ctx.NoContent(http.StatusNoContent)
 }
 
 // rateLog keeps a misbehaving client from flooding the journal: the first 20
-// anomalies are logged, then every 1000th.
-func (c *Capture) rateLog(format string, a ...any) {
-	n := c.logged.Add(1)
+// messages of each class are logged, then every 1000th.
+func (c *Capture) rateLog(counter *atomic.Int64, format string, a ...any) {
+	n := counter.Add(1)
 	if n <= 20 || n%1000 == 0 {
 		log.Printf(format, a...)
 	}

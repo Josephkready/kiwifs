@@ -2,13 +2,22 @@
 // (Phase 1: capture real user flows into SQLite).
 //
 // recorder.js (served by the web UI) posts batches of semantic intent events.
-// This package validates them exactly like flowstore.py's FlowStore.ingest and
+// This package validates them like flowstore.py's FlowStore.ingest (narrowing
+// where noted: no nav titles, redacted note paths, ASCII session ids) and
 // writes them into a SQLite db that shares schema.sql with the Python tool, so
 // `python3 vdebug/capture/flowstore.py mine --db <path>` runs on the same file.
 //
 // The client is untrusted: event types and payload keys are allowlisted, strings
 // are capped, and re-sent batches are idempotent via UNIQUE(session_id, seq).
 // No input values, query values, raw user agent, or user id are ever stored.
+//
+// Configuration (environment, read once by `kiwifs serve`):
+//
+//	KIWIFS_VD_CAPTURE         "0"/"false"/"off"/"no" disables capture (default: on)
+//	KIWIFS_VD_FLOWS_DB        SQLite path (default /var/lib/kiwifs/flows.db); refused
+//	                          inside --root; unopenable -> capture off, app unaffected
+//	KIWIFS_VD_SAMPLE          fraction of browser sessions recorded, 0..1 (default 1)
+//	KIWIFS_VD_RETENTION_DAYS  sessions idle longer are pruned daily (default 30)
 package vdcapture
 
 import (
@@ -246,6 +255,8 @@ func redactPath(p *string) *string {
 	return &path
 }
 
+// validSessionID is ASCII-only, stricter than flowstore.py's str.isalnum()
+// (which also accepts Unicode letters). recorder.js only emits hex ids.
 func validSessionID(s string) bool {
 	if len(s) < 8 || len(s) > 64 {
 		return false
