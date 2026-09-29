@@ -114,6 +114,23 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// Prune deletes sessions (and their events, via ON DELETE CASCADE) not seen
+// for `days`, mirroring flowstore.py's FlowStore.prune. It returns the number
+// of sessions removed. days <= 0 is a no-op (retention disabled).
+func (s *Store) Prune(days int) (int64, error) {
+	if days <= 0 {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cutoff := s.now().UTC().Add(-time.Duration(days)*24*time.Hour).Format("2006-01-02T15:04:05") + "+00:00"
+	res, err := s.db.Exec("DELETE FROM sessions WHERE last_seen_at < ?", cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // isoNow matches Python's datetime.now(timezone.utc).isoformat(timespec="seconds"),
 // so flowstore.py prune's string comparison keeps working on Go-written rows.
 func (s *Store) isoNow() string {

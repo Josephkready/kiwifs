@@ -304,6 +304,83 @@ func TestIngestSessionRowUsesServerClockAndCoarseDevice(t *testing.T) {
 	}
 }
 
+func TestPruneDeletesOnlyIdleSessions(t *testing.T) {
+	st := openStore(t)
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	st.now = func() time.Time { return now }
+
+	insertSession := func(id string, lastSeenDaysAgo int) {
+		t.Helper()
+		lastSeen := now.Add(-time.Duration(lastSeenDaysAgo) * 24 * time.Hour).
+			Format("2006-01-02T15:04:05") + "+00:00"
+		if _, err := st.db.Exec(
+			"INSERT INTO sessions (id, started_at, last_seen_at, ua_class) VALUES (?, ?, ?, 'desktop')",
+			id, lastSeen, lastSeen,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.db.Exec(
+			"INSERT INTO events (session_id, seq, t_ms, type) VALUES (?, 0, 0, 'nav')", id,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertSession("fresh0000000000", 1)  // 1 day idle: kept
+	insertSession("stale00000000000", 31) // 31 days idle: pruned
+
+	n, err := st.Prune(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("pruned %d session(s), want 1", n)
+	}
+
+	var remaining []string
+	rows, err := st.db.Query("SELECT id FROM sessions ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		remaining = append(remaining, id)
+	}
+	if len(remaining) != 1 || remaining[0] != "fresh0000000000" {
+		t.Fatalf("remaining sessions = %v, want only the fresh one", remaining)
+	}
+
+	var eventCount int
+	if err := st.db.QueryRow("SELECT COUNT(*) FROM events WHERE session_id = 'stale00000000000'").Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if eventCount != 0 {
+		t.Fatalf("pruning a session must cascade-delete its events, found %d left", eventCount)
+	}
+}
+
+func TestPruneDisabledForNonPositiveDays(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.db.Exec(
+		"INSERT INTO sessions (id, started_at, last_seen_at, ua_class) VALUES (?, '2000-01-01T00:00:00+00:00', '2000-01-01T00:00:00+00:00', 'desktop')",
+		sid,
+	); err != nil {
+		t.Fatal(err)
+	}
+	n, err := st.Prune(0)
+	if err != nil || n != 0 {
+		t.Fatalf("Prune(0) = %d, %v, want 0, nil", n, err)
+	}
+	var count int
+	st.db.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&count)
+	if count != 1 {
+		t.Fatalf("Prune(0) must be a no-op, sessions = %d", count)
+	}
+}
+
 func TestUAClass(t *testing.T) {
 	i := func(n int64) *int64 { return &n }
 	cases := []struct {

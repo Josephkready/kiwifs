@@ -77,9 +77,17 @@ export function KiwiTags({ onTagClick, onNavigate }: Props) {
             <Badge
               key={tag}
               variant={selectedTag === tag ? "default" : "secondary"}
-              className="cursor-pointer hover:bg-primary/20 transition-colors gap-1"
+              className="cursor-pointer hover:bg-primary/20 transition-colors gap-1 py-1"
               style={{ fontSize: `${scale}rem` }}
+              role="button"
+              tabIndex={0}
               onClick={() => handleTagSelect(tag)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleTagSelect(tag);
+                }
+              }}
             >
               <Tag className="h-3 w-3" />
               {tag}

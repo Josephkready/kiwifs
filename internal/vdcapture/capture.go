@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/time/rate"
@@ -35,10 +36,17 @@ const (
 	IngestPerSecond = 20
 	IngestBurst     = 200
 
-	EnvCapture = "KIWIFS_VD_CAPTURE"  // "0"/"false"/"off"/"no" disables capture
-	EnvFlowsDB = "KIWIFS_VD_FLOWS_DB" // SQLite path; must be a state path, never under --root
-	EnvSample  = "KIWIFS_VD_SAMPLE"   // fraction of browser sessions recorded, 0..1
-	DefaultDB  = "/var/lib/kiwifs/flows.db"
+	EnvCapture           = "KIWIFS_VD_CAPTURE"        // "0"/"false"/"off"/"no" disables capture
+	EnvFlowsDB           = "KIWIFS_VD_FLOWS_DB"       // SQLite path; must be a state path, never under --root
+	EnvSample            = "KIWIFS_VD_SAMPLE"         // fraction of browser sessions recorded, 0..1
+	EnvRetentionDays     = "KIWIFS_VD_RETENTION_DAYS" // idle-session retention window; <= 0 disables pruning
+	DefaultDB            = "/var/lib/kiwifs/flows.db"
+	DefaultRetentionDays = 30
+
+	// retentionInterval bounds how often the in-process retention loop can run
+	// its best-effort prune: at most once per this period, so the server needs
+	// no separate daily host timer for it.
+	retentionInterval = 24 * time.Hour
 )
 
 // Capture is the process-wide capture switch. A nil or disabled Capture serves
@@ -49,6 +57,10 @@ type Capture struct {
 	limiter *rate.Limiter
 	// One log budget per message class, so a flood of one kind can't mute another.
 	logRejected, logDropped, logFailed, logLimited atomic.Int64
+
+	retentionStop chan struct{}
+	retentionOnce sync.Once
+	retentionWG   sync.WaitGroup
 }
 
 // FromEnv opens capture per the env vars. Any failure (unwritable state dir,
@@ -83,7 +95,24 @@ func FromEnv(servedRoot string) *Capture {
 		return nil
 	}
 	log.Printf("vdcapture: recording user flows into %s (sample=%g)", path, sample)
-	return New(st, sample)
+	c := New(st, sample)
+	c.StartRetention(retentionDaysFromEnv())
+	return c
+}
+
+// retentionDaysFromEnv reads EnvRetentionDays, defaulting to DefaultRetentionDays
+// on an unset or invalid value.
+func retentionDaysFromEnv() int {
+	v := strings.TrimSpace(os.Getenv(EnvRetentionDays))
+	if v == "" {
+		return DefaultRetentionDays
+	}
+	days, err := strconv.Atoi(v)
+	if err != nil {
+		log.Printf("vdcapture: ignoring invalid %s=%q (want an integer), using default %d", EnvRetentionDays, v, DefaultRetentionDays)
+		return DefaultRetentionDays
+	}
+	return days
 }
 
 // New wraps an open store; used by tests and embedders.
@@ -94,10 +123,64 @@ func New(st *Store, sample float64) *Capture {
 func (c *Capture) Enabled() bool { return c != nil && c.store != nil && c.sample > 0 }
 
 func (c *Capture) Close() error {
-	if c == nil || c.store == nil {
+	if c == nil {
+		return nil
+	}
+	c.stopRetention()
+	if c.store == nil {
 		return nil
 	}
 	return c.store.Close()
+}
+
+// StartRetention launches a background loop that best-effort prunes sessions
+// idle longer than `days` (see Store.Prune), once immediately and then at
+// most once every 24h for as long as the process runs — the whole reason
+// kiwifs no longer needs a separate daily host timer for this. days <= 0
+// disables it. Safe to call at most once per Capture; a second call is a
+// no-op.
+func (c *Capture) StartRetention(days int) {
+	if c == nil || c.store == nil || days <= 0 {
+		return
+	}
+	if c.retentionStop != nil {
+		return
+	}
+	c.retentionStop = make(chan struct{})
+	c.retentionWG.Add(1)
+	go func() {
+		defer c.retentionWG.Done()
+		c.pruneBestEffort(days)
+		ticker := time.NewTicker(retentionInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				c.pruneBestEffort(days)
+			case <-c.retentionStop:
+				return
+			}
+		}
+	}()
+}
+
+func (c *Capture) pruneBestEffort(days int) {
+	n, err := c.store.Prune(days)
+	if err != nil {
+		log.Printf("vdcapture: retention prune failed: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("vdcapture: retention pruned %d idle session(s) older than %d day(s)", n, days)
+	}
+}
+
+func (c *Capture) stopRetention() {
+	if c == nil || c.retentionStop == nil {
+		return
+	}
+	c.retentionOnce.Do(func() { close(c.retentionStop) })
+	c.retentionWG.Wait()
 }
 
 // ScriptTag is injected into index.html's <head>; empty when capture is off.

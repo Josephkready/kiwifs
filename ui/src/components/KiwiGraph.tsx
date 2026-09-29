@@ -19,6 +19,7 @@ import * as THREE from "three";
 import { api, type GraphResponse, type TreeEntry } from "@kw/lib/api";
 import { buildResolver } from "@kw/lib/wikiLinks";
 import { titleize } from "@kw/lib/paths";
+import { truncateLabel } from "@kw/lib/graphLabel";
 import { cn } from "@kw/lib/cn";
 import { getGraphPerformanceProfile, type GraphPerformanceProfile } from "@kw/lib/graphPerformance";
 import {
@@ -101,7 +102,9 @@ interface GLink {
 }
 
 
-function createNodeLabelSprite(label: string, isDark: boolean): THREE.Sprite {
+const NODE_LABEL_SPRITE_MAX_TEXT_WIDTH = 240;
+
+function createNodeLabelSprite(label: string, isDark: boolean, showFull: boolean): THREE.Sprite {
   const paddingX = 16;
   const paddingY = 8;
   const fontSize = 28;
@@ -109,7 +112,10 @@ function createNodeLabelSprite(label: string, isDark: boolean): THREE.Sprite {
   const measureCanvas = document.createElement("canvas");
   const measureCtx = measureCanvas.getContext("2d")!;
   measureCtx.font = font;
-  const textWidth = Math.ceil(measureCtx.measureText(label).width);
+  const displayLabel = showFull
+    ? label
+    : truncateLabel(label, NODE_LABEL_SPRITE_MAX_TEXT_WIDTH, (s) => measureCtx.measureText(s).width);
+  const textWidth = Math.ceil(measureCtx.measureText(displayLabel).width);
   const width = Math.max(64, textWidth + paddingX * 2);
   const height = fontSize + paddingY * 2;
 
@@ -140,7 +146,7 @@ function createNodeLabelSprite(label: string, isDark: boolean): THREE.Sprite {
   ctx.stroke();
 
   ctx.fillStyle = isDark ? "rgba(255,255,255,0.92)" : "rgba(15,23,42,0.9)";
-  ctx.fillText(label, width / 2, height / 2);
+  ctx.fillText(displayLabel, width / 2, height / 2);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
@@ -483,8 +489,12 @@ export function KiwiGraph({ tree, activePath, onNavigate, onClose }: Props) {
     [graphMode],
   );
 
+  // Padding must clear more than just the node circles: labels are centered
+  // under each node and can run up to ~NODE_LABEL_SPRITE_MAX_TEXT_WIDTH/2 (2D:
+  // maxLabelWidth/2) past the node's edge on either side. A node fit flush to
+  // the padding-48 boundary still clipped its own label at the canvas edge.
   const fitGraphToView = useCallback(() => {
-    getGraphApi()?.zoomToFit(400, 48, nodeVisible);
+    getGraphApi()?.zoomToFit(400, 90, nodeVisible);
   }, [getGraphApi, nodeVisible]);
 
   useEffect(() => {
@@ -701,7 +711,15 @@ export function KiwiGraph({ tree, activePath, onNavigate, onClose }: Props) {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = isDark ? "rgba(255,255,255,0.88)" : "rgba(20,20,20,0.82)";
-      ctx.fillText(node.label, nx, ny + r + fontSize);
+      // Keep the on-screen label budget constant regardless of zoom (fontSize
+      // is likewise divided by globalScale) so long titles don't run past the
+      // canvas edges or through neighbouring labels; full text still shows on
+      // hover/active/path/search highlight.
+      const maxLabelWidth = 140 / globalScale;
+      const displayLabel = highlighted
+        ? node.label
+        : truncateLabel(node.label, maxLabelWidth, (s) => ctx.measureText(s).width);
+      ctx.fillText(displayLabel, nx, ny + r + fontSize);
     },
     [activePath, adj, hovered, nodeColor, pathSet, qLower, nodeMatchesQuery, shouldShowInlineLabel],
   );
@@ -765,7 +783,7 @@ export function KiwiGraph({ tree, activePath, onNavigate, onClose }: Props) {
       group.add(sprite);
 
       if (shouldShowInlineLabel(node)) {
-        const label = createNodeLabelSprite(node.label, isDark);
+        const label = createNodeLabelSprite(node.label, isDark, highlighted);
         label.position.set(0, r + 8, 0);
         group.add(label);
       }
@@ -779,7 +797,7 @@ export function KiwiGraph({ tree, activePath, onNavigate, onClose }: Props) {
     <div className="h-full w-full flex flex-col relative">
       {/* ── Toolbar ── */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-6 py-3 border-b border-border bg-card shrink-0">
-        <Button variant="outline" size="sm" onClick={onClose}>
+        <Button variant="outline" size="sm" onClick={onClose} aria-label="Back">
           <ArrowLeft className="h-3.5 w-3.5" />{" "}
           <span className="hidden sm:inline">Back</span>
         </Button>

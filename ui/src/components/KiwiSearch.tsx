@@ -152,7 +152,7 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
               <button
                 type="button"
                 onClick={() => setDirFilter("")}
-                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs bg-secondary text-secondary-foreground border-secondary"
+                className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs bg-secondary text-secondary-foreground border-secondary"
               >
                 {dirFilter}
                 <X className="h-2.5 w-2.5" />
@@ -175,7 +175,7 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
           <button
             type="button"
             onClick={() => setDateFilter("")}
-            className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs bg-secondary text-secondary-foreground border-secondary"
+            className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs bg-secondary text-secondary-foreground border-secondary"
           >
             {dateFilter}
             <X className="h-2.5 w-2.5" />
@@ -323,7 +323,7 @@ function ModeChip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+        "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
         active
           ? "bg-primary text-primary-foreground border-primary"
           : "bg-transparent text-muted-foreground border-border hover:text-foreground hover:border-foreground/40"

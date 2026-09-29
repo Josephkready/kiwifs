@@ -336,18 +336,6 @@ export default function App() {
   }, [tree, treeLoading, spaceKey, refreshPublishedPages]);
 
   useEffect(() => {
-    if (!tree || !uiConfigLoaded || activePath) return;
-    if (!shouldApplyStartPage(activePath, hasDeepLinkPath())) return;
-    if (resolvedStartPage.mode === "dashboard") {
-      setActivePath(resolveDashboardPath(tree));
-      return;
-    }
-    if (resolvedStartPage.mode === "path") {
-      setActivePath(resolvedStartPage.path);
-    }
-  }, [tree, uiConfigLoaded, activePath, resolvedStartPage]);
-
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       const action = matchBoundAction(e, bindings);
@@ -610,6 +598,24 @@ const handleSpaceSwitch = useCallback(() => {
     }
   }, [activePath, spaceKey, isCloudMode, isDemoMode]);
 
+  // Must run after the URL-sync effect above (same commit, both keyed on
+  // activePath): hasDeepLinkPath() reads window.location.pathname live, and
+  // when a "Go to index" (or similar setActivePath(null)) transition still
+  // shows the pre-navigation deep-link URL, this effect would otherwise see
+  // a stale "still a deep link" and skip applying the configured start page,
+  // with nothing left to re-trigger it (activePath stays null).
+  useEffect(() => {
+    if (!tree || !uiConfigLoaded || activePath) return;
+    if (!shouldApplyStartPage(activePath, hasDeepLinkPath())) return;
+    if (resolvedStartPage.mode === "dashboard") {
+      setActivePath(resolveDashboardPath(tree));
+      return;
+    }
+    if (resolvedStartPage.mode === "path") {
+      setActivePath(resolvedStartPage.path);
+    }
+  }, [tree, uiConfigLoaded, activePath, resolvedStartPage]);
+
   useEffect(() => {
     if (isCloudMode || isDemoMode) return;
     const onPopState = () => {
@@ -708,7 +714,13 @@ const handleSpaceSwitch = useCallback(() => {
         {/* ── Header: full-width app bar ── */}
         <header className="h-12 shrink-0 border-b border-border bg-card flex items-center px-3 gap-2">
           {/* Left zone: sidebar toggle + logo + space */}
-          <div className="flex items-center gap-2 min-w-0">
+          {/* shrink-0, not min-w-0: at mobile widths the center search zone
+              (flex-1) is what should give up space first. min-w-0 here let
+              this zone's box shrink below its own content's width, so the
+              (fixed-size) toggle button either got visually squeezed or, once
+              it stopped shrinking, spilled out of its shrunk box into the
+              search bar next to it. */}
+          <div className="flex items-center gap-2 shrink-0">
             <ToolbarButton
               onClick={() => toggleSidebar(!sidebarOpen)}
               label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
@@ -718,7 +730,10 @@ const handleSpaceSwitch = useCallback(() => {
                 : <PanelLeftOpen className="h-4 w-4" />}
             </ToolbarButton>
             <div className="flex items-center gap-2">
-              <img src={branding.logoUrl} alt={branding.name} className="h-7 w-7 shrink-0" />
+              {/* Hidden below sm along with the name: on mobile every extra
+                  fixed-width px here competes with the toolbar's own 7 view
+                  buttons + theme toggle for the same shrink-0'd header row. */}
+              <img src={branding.logoUrl} alt={branding.name} className="h-7 w-7 shrink-0 hidden sm:block" />
               <span className="font-semibold text-sm hidden sm:inline">{branding.name}</span>
             </div>
           </div>
@@ -740,7 +755,7 @@ const handleSpaceSwitch = useCallback(() => {
           </div>
 
           {/* Right zone: actions */}
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-0.5 shrink-0">
             {features.edit && (
             <ToolbarButton onClick={() => { setNewFolder(undefined); setNewOpen(true); }} label={`New page (${formatChordDisplay(bindings.new_page)})`}>
               <Plus className="h-4 w-4" />
@@ -1156,7 +1171,7 @@ function ToolbarButton({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8"
+          className="h-7 w-7 shrink-0 sm:h-8 sm:w-8"
           aria-label={label}
           onClick={onClick}
           disabled={disabled}
