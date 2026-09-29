@@ -144,7 +144,7 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
         value={query}
         onValueChange={setQuery}
       />
-      <div className="flex items-center gap-1 px-3 py-2 border-b border-border text-xs flex-wrap">
+      <div data-vd-mask className="flex items-center gap-1 px-3 py-2 border-b border-border text-xs flex-wrap">
         {dirs.length > 0 && (
           <>
             <FolderOpen className="h-3 w-3 text-muted-foreground" />
@@ -202,7 +202,7 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
           </>
         )}
       </div>
-      <CommandList>
+      <CommandList data-vd-mask>
         {!query.trim() && recents.length > 0 && (
           <CommandGroup heading="Recent searches">
             {recents.map((q) => (

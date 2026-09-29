@@ -30,6 +30,7 @@ import (
 	"github.com/kiwifs/kiwifs/internal/rbac"
 	"github.com/kiwifs/kiwifs/internal/search"
 	"github.com/kiwifs/kiwifs/internal/tracing"
+	"github.com/kiwifs/kiwifs/internal/vdcapture"
 	"github.com/kiwifs/kiwifs/internal/vectorstore"
 	"github.com/kiwifs/kiwifs/internal/webhooks"
 	"github.com/kiwifs/kiwifs/internal/webui"
@@ -230,7 +231,7 @@ func (s *Server) setupMiddleware() {
 		Format: "${time_rfc3339} ${method} ${uri} ${status} ${latency_human} ${bytes_in}b in ${bytes_out}b out\n",
 		Skipper: func(c echo.Context) bool {
 			p := c.Path()
-			return p == "/health" || p == "/healthz" || p == "/readyz" || p == "/metrics"
+			return p == "/health" || p == "/healthz" || p == "/readyz" || p == "/metrics" || p == vdcapture.EventsPath
 		},
 	}))
 	if s.cfg.Tracing.IsEnabled() {
@@ -691,6 +692,13 @@ func (s *Server) setupRoutes() {
 	if s.mcpHandler != nil {
 		s.echo.Any("/mcp", echo.WrapHandler(s.mcpHandler))
 	}
+
+	// video-debugger flow capture: unauthenticated by design (it stores intent
+	// events only, never content), so it sits outside the /api/kiwi auth group.
+	capture := vdcapture.Default()
+	s.echo.GET(vdcapture.RecorderPath, vdcapture.ServeRecorder)
+	s.echo.POST(vdcapture.EventsPath, capture.HandleEvents)
+	webui.SetHeadInjection(capture.ScriptTag())
 
 	webui.SetBranding(s.cfg.UI.Branding)
 	uiHandler := webui.Handler()

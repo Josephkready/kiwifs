@@ -1,0 +1,1 @@
+../../internal/vdcapture/recorder.js

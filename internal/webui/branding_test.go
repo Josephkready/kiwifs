@@ -47,3 +47,18 @@ func TestFaviconLinkTag_PNG(t *testing.T) {
 		t.Fatalf("unexpected tag: %s", tag)
 	}
 }
+
+func TestInjectBranding_HeadInjection(t *testing.T) {
+	SetBranding(config.BrandingConfig{})
+	t.Cleanup(func() { SetHeadInjection("") })
+	html := []byte(`<!doctype html><head><title>KiwiFS</title></head><body></body>`)
+
+	if out := string(injectBranding(html)); strings.Contains(out, "vd") {
+		t.Fatalf("no injection expected by default, got: %s", out)
+	}
+	SetHeadInjection(`<script src="/_vd/recorder.js" defer></script>`)
+	out := string(injectBranding(html))
+	if !strings.Contains(out, `<script src="/_vd/recorder.js" defer></script></head>`) {
+		t.Fatalf("expected recorder tag before </head>, got: %s", out)
+	}
+}

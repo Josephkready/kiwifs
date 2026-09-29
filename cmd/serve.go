@@ -23,6 +23,7 @@ import (
 	kiwinfs "github.com/kiwifs/kiwifs/internal/nfs"
 	kiwis3 "github.com/kiwifs/kiwifs/internal/s3"
 	"github.com/kiwifs/kiwifs/internal/spaces"
+	"github.com/kiwifs/kiwifs/internal/vdcapture"
 	"github.com/kiwifs/kiwifs/internal/watcher"
 	kiwidav "github.com/kiwifs/kiwifs/internal/webdav"
 	"github.com/spf13/cobra"
@@ -152,6 +153,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if len(spaceSpecs) > 0 {
 		defaultCfg = spaces.FilterKeysForSpace(cfg, "default")
 	}
+	// video-debugger flow capture (see AGENTS.md "Visual QA"). Must be installed
+	// before any server is built so the UI shell gets the recorder tag.
+	capture := vdcapture.FromEnv(root)
+	vdcapture.SetDefault(capture)
+	defer capture.Close()
+
 	stack, err := bootstrap.Build("default", root, defaultCfg)
 	if err != nil {
 		return err

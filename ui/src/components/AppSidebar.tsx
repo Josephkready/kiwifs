@@ -118,6 +118,7 @@ export function AppSidebar({
 
   return (
     <aside
+      data-vd-mask
       className={
         isMobile
           ? "kiwi-tree-sidebar absolute inset-y-0 left-0 z-30 border-r border-border bg-card flex flex-col overflow-hidden transition-transform duration-200 " + (sidebarOpen ? "translate-x-0" : "-translate-x-full")

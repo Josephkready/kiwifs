@@ -1,0 +1,66 @@
+<!doctype html>
+<!-- Fixture for vdebug tests: a small app with PLANTED responsive bugs.
+     - .hero-banner has a hardcoded 480px width  -> horizontal overflow on mobile
+     - .cta button has a fixed 60px width         -> its label spills out
+     - .tiny icon link is 14x14                    -> small tap target on mobile
+     - the mobile menu opens as an off-screen dropdown with near-invisible link text
+       (#ddd on #f4f4f4). It closes when a link is clicked, so this bug exists ONLY in
+       the "nav open" checkpoint — a judge that skims later images misses it.
+     - .clip-label cuts its text with overflow:hidden and no ellipsis -> text-clipped
+     - two .chip buttons overlap by ~20px                            -> overlapping-controls
+     - ANIMATION bug: "Add to basket now" shows an "Added to basket" toast whose entry
+       animation (1s) overshoots across the page, blown up over the header, and flickers
+       between ~250-750ms, then settles in a perfectly normal bottom-right spot. The final
+       state is clean and the toast is position:fixed (skipped by layout_checks.js), so only
+       a judge that sees the MOTION can find it. Triggered by testdata/flows/basket_toast.py.
+     Also carries recorder.js privacy probes: a plan <select> OPTED IN to value capture
+     (data-vd-capture-value) and a newsletter checkbox that is NOT. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fixture Shop</title>
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #234; color: #fff; }
+  nav a { color: #fff; margin-right: 12px; }
+  .hero-banner { width: 480px; height: 120px; background: #fc6; margin: 12px; }
+  .cta { width: 60px; white-space: nowrap; }
+  .tiny { display: inline-block; width: 14px; height: 14px; background: #c33; vertical-align: middle; }
+  .promo { margin: 24px 12px; padding: 8px; border: 1px solid #ccc; }
+  .clip-label { display: block; width: 90px; overflow: hidden; white-space: nowrap; margin: 12px; }
+  .chips { margin: 12px; } .chip { width: 80px; } .chip + .chip { margin-left: -20px; }
+  #menu-btn { display: none; }
+  .toast { position: fixed; right: 16px; bottom: 16px; background: #222; color: #fff; padding: 10px 14px;
+           border-radius: 6px; animation: toast-in 1s ease-out both; }
+  @keyframes toast-in {
+    0%   { transform: translateX(130%); opacity: 1; }
+    25%  { transform: translate(-55vw, -75vh) scale(1.8); opacity: 1; }
+    35%  { opacity: 0; } 42% { opacity: 1; } 50% { opacity: 0; } 58% { opacity: 1; }
+    75%  { transform: translate(-55vw, -75vh) scale(1.8); }
+    100% { transform: none; opacity: 1; }
+  }
+  @media (max-width: 600px) {
+    nav { display: none; } #menu-btn { display: inline-block; }
+    nav.open { display: block; position: absolute; top: 44px; left: 180px; width: 320px; padding: 8px; background: #f4f4f4; }
+    nav.open a { display: block; color: #ddd; padding: 6px 0; }
+  }
+</style></head>
+<body>
+<header><strong>Fixture Shop</strong>
+  <button id="menu-btn" aria-label="Menu" onclick="document.querySelector('nav').classList.toggle('open')">☰</button>
+  <nav onclick="if (event.target.tagName === 'A') this.classList.remove('open')"><a href="#products" data-testid="nav-products">Products</a><a href="#about">About</a></nav>
+</header>
+<main>
+  <div class="hero-banner">Big summer sale</div>
+  <button class="cta" data-testid="buy" onclick="var t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = 'Added to basket'; document.body.appendChild(t);">Add to basket now</button>
+  <form id="signup" onsubmit="event.preventDefault()"><label>Email <input type="email" name="email"></label>
+    <button type="submit">Sign up</button></form>
+  <span class="clip-label">Estimated delivery Thursday</span>
+  <div class="chips"><button class="chip">Small</button><button class="chip">Large</button></div>
+  <label>Plan <select name="plan" data-vd-capture-value><option>basic</option><option>pro</option></select></label>
+  <label><input type="checkbox" name="newsletter"> Newsletter</label>
+  <p id="products">Products section</p>
+  <!-- Kept apart from the .cta button: right after it, judges read the red square as part
+       of the spilling button text instead of as its own tap-target bug. -->
+  <p class="promo">Free delivery this week <a class="tiny" href="#x" aria-label="close"></a></p>
+</main>
+<script src="/recorder.js" data-endpoint="/ingest" defer></script>
+</body></html>
