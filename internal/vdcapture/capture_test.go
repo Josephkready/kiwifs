@@ -156,7 +156,6 @@ func TestFromEnvIgnoresInvalidTuning(t *testing.T) {
 	t.Setenv(EnvCapture, "")
 	t.Setenv(EnvFlowsDB, filepath.Join(t.TempDir(), "flows.db"))
 	t.Setenv(EnvSample, "lots")
-	t.Setenv(EnvDays, "-3")
 	c := FromEnv(t.TempDir())
 	if c == nil {
 		t.Fatal("invalid tuning values must fall back to defaults, not disable capture")

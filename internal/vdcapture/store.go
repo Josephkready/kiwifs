@@ -17,7 +17,6 @@
 //	KIWIFS_VD_FLOWS_DB        SQLite path (default /var/lib/kiwifs/flows.db); refused
 //	                          inside --root; unopenable -> capture off, app unaffected
 //	KIWIFS_VD_SAMPLE          fraction of browser sessions recorded, 0..1 (default 1)
-//	KIWIFS_VD_RETENTION_DAYS  sessions idle longer are pruned daily (default 30)
 package vdcapture
 
 import (
@@ -212,19 +211,6 @@ func (s *Store) Ingest(body []byte, userAgent string) (Result, error) {
 		return res, err
 	}
 	return res, tx.Commit()
-}
-
-// Prune deletes sessions (and, via ON DELETE CASCADE, their events) not seen
-// for `days`, like `flowstore.py prune`. Returns sessions removed.
-func (s *Store) Prune(days int) (int64, error) {
-	cutoff := s.now().UTC().AddDate(0, 0, -days).Format("2006-01-02T15:04:05") + "+00:00"
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	r, err := s.db.Exec("DELETE FROM sessions WHERE last_seen_at < ?", cutoff)
-	if err != nil {
-		return 0, err
-	}
-	return r.RowsAffected()
 }
 
 // contentRoutes carry a note path after the prefix. The note path is content

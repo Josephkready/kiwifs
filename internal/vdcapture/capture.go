@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/time/rate"
@@ -36,10 +35,9 @@ const (
 	IngestPerSecond = 20
 	IngestBurst     = 200
 
-	EnvCapture = "KIWIFS_VD_CAPTURE"        // "0"/"false"/"off"/"no" disables capture
-	EnvFlowsDB = "KIWIFS_VD_FLOWS_DB"       // SQLite path; must be a state path, never under --root
-	EnvSample  = "KIWIFS_VD_SAMPLE"         // fraction of browser sessions recorded, 0..1
-	EnvDays    = "KIWIFS_VD_RETENTION_DAYS" // sessions idle longer are pruned daily (default 30)
+	EnvCapture = "KIWIFS_VD_CAPTURE"  // "0"/"false"/"off"/"no" disables capture
+	EnvFlowsDB = "KIWIFS_VD_FLOWS_DB" // SQLite path; must be a state path, never under --root
+	EnvSample  = "KIWIFS_VD_SAMPLE"   // fraction of browser sessions recorded, 0..1
 	DefaultDB  = "/var/lib/kiwifs/flows.db"
 )
 
@@ -49,7 +47,6 @@ type Capture struct {
 	store   *Store
 	sample  float64
 	limiter *rate.Limiter
-	stop    chan struct{}
 	// One log budget per message class, so a flood of one kind can't mute another.
 	logRejected, logDropped, logFailed, logLimited atomic.Int64
 }
@@ -85,37 +82,8 @@ func FromEnv(servedRoot string) *Capture {
 		log.Printf("vdcapture: disabled, cannot open %s: %v (set %s to a writable state path, or %s=0)", path, err, EnvFlowsDB, EnvCapture)
 		return nil
 	}
-	days := 30
-	if v := strings.TrimSpace(os.Getenv(EnvDays)); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			days = n
-		} else {
-			log.Printf("vdcapture: ignoring invalid %s=%q", EnvDays, v)
-		}
-	}
-	log.Printf("vdcapture: recording user flows into %s (sample=%g, retention=%dd)", path, sample, days)
-	c := New(st, sample)
-	c.stop = make(chan struct{})
-	go c.pruneLoop(days, 24*time.Hour)
-	return c
-}
-
-// pruneLoop is the retention the skill otherwise asks a host timer for.
-func (c *Capture) pruneLoop(days int, every time.Duration) {
-	t := time.NewTicker(every)
-	defer t.Stop()
-	for {
-		if n, err := c.store.Prune(days); err != nil {
-			c.rateLog(&c.logFailed, "vdcapture: prune failed: %v", err)
-		} else if n > 0 {
-			log.Printf("vdcapture: pruned %d session(s) idle > %dd", n, days)
-		}
-		select {
-		case <-c.stop:
-			return
-		case <-t.C:
-		}
-	}
+	log.Printf("vdcapture: recording user flows into %s (sample=%g)", path, sample)
+	return New(st, sample)
 }
 
 // New wraps an open store; used by tests and embedders.
@@ -128,10 +96,6 @@ func (c *Capture) Enabled() bool { return c != nil && c.store != nil && c.sample
 func (c *Capture) Close() error {
 	if c == nil || c.store == nil {
 		return nil
-	}
-	if c.stop != nil {
-		close(c.stop)
-		c.stop = nil
 	}
 	return c.store.Close()
 }

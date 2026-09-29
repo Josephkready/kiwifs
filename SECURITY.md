@@ -94,8 +94,8 @@ JS errors) to `POST /api/_vd/events`, stored in a separate SQLite db.
   note paths (`/page/<path>` becomes `/page/:path`), page titles, or labels inside the note body,
   sidebar tree and search results. Automated browsers record nothing.
 - **Where:** `KIWIFS_VD_FLOWS_DB` (default `/var/lib/kiwifs/flows.db`). A path inside `--root` is
-  refused, since `/raw/*` would serve it. Sessions idle for `KIWIFS_VD_RETENTION_DAYS` (default 30)
-  are deleted daily.
+  refused, since `/raw/*` would serve it. Prune it daily with
+  `python3 vdebug/capture/flowstore.py prune --db <db> --days 30`.
 - **Turn it off:** `KIWIFS_VD_CAPTURE=0`, or sample with `KIWIFS_VD_SAMPLE=0..1`. If the db can't
   be opened, capture turns itself off and KiwiFS runs normally.
 - The ingest endpoint is unauthenticated and rate-limited to 20 batches/s per process; also cap it

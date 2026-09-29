@@ -350,25 +350,3 @@ func TestToIntMirrorsPythonInt(t *testing.T) {
 }
 
 func ptr(n int64) *int64 { return &n }
-
-func TestPruneDropsIdleSessionsAndTheirEvents(t *testing.T) {
-	st := openStore(t)
-	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	st.now = func() time.Time { return base }
-	if _, err := st.Ingest(batchJSON(t, ev(0, "nav", nil), ev(1, "click", nil)), ""); err != nil {
-		t.Fatal(err)
-	}
-	st.now = func() time.Time { return base.AddDate(0, 0, 10) }
-	if n, _ := st.Prune(30); n != 0 {
-		t.Fatalf("fresh session pruned: %d", n)
-	}
-	st.now = func() time.Time { return base.AddDate(0, 0, 31) }
-	if n, err := st.Prune(30); err != nil || n != 1 {
-		t.Fatalf("prune = %d, %v", n, err)
-	}
-	var events int
-	st.db.QueryRow("SELECT COUNT(*) FROM events").Scan(&events)
-	if events != 0 {
-		t.Fatalf("events of a pruned session must cascade, %d left", events)
-	}
-}
