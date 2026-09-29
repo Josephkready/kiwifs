@@ -86,12 +86,14 @@
 }
 .kiwi-prose p {
   @apply my-3 text-foreground/90;
+  overflow-wrap: anywhere;
 }
 .kiwi-prose a {
   color: var(--link-color);
   text-decoration: var(--link-decoration);
   @apply font-medium underline-offset-4 decoration-primary/60;
   transition: opacity 0.15s ease;
+  overflow-wrap: anywhere;
 }
 .kiwi-prose a:hover {
   @apply decoration-primary;
@@ -103,8 +105,12 @@
 .kiwi-prose ol {
   @apply list-decimal pl-6 my-3 space-y-1;
 }
+.kiwi-prose li {
+  overflow-wrap: anywhere;
+}
 .kiwi-prose blockquote {
   @apply border-l-4 border-primary/40 pl-4 my-4 text-muted-foreground italic;
+  overflow-wrap: anywhere;
 }
 .kiwi-prose code {
   background: var(--code-bg);
@@ -245,9 +251,11 @@
 }
 .kiwi-prose dt {
   @apply font-semibold mt-3 first:mt-0;
+  overflow-wrap: anywhere;
 }
 .kiwi-prose dd {
   @apply ml-6 text-foreground/80;
+  overflow-wrap: anywhere;
 }
 
 /* ─── Abbreviations ─── */
