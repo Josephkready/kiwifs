@@ -45,3 +45,7 @@ knowledge/
 # Storybook
 ui/storybook-static/
 node_modules/
+
+# video-debugger recordings (artifacts, never source)
+vdebug-runs/
+__pycache__/

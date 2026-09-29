@@ -727,6 +727,7 @@ const handleSpaceSwitch = useCallback(() => {
           <div className="flex-1 flex justify-center px-2 sm:px-4">
             <button
               type="button"
+              data-testid="open-search"
               onClick={() => setSearchOpen(true)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-background hover:bg-accent text-muted-foreground text-sm transition-colors w-full max-w-md"
             >
@@ -862,7 +863,7 @@ const handleSpaceSwitch = useCallback(() => {
           )}
 
           {/* Main content area */}
-          <main className={`flex-1 relative ${basesOpen || canvasOpen || whiteboardOpen || timelineOpen || kanbanOpen || dataOpen || graphOpen ? "overflow-hidden" : "overflow-auto kiwi-scroll"}`}>
+          <main data-vd-mask className={`flex-1 relative ${basesOpen || canvasOpen || whiteboardOpen || timelineOpen || kanbanOpen || dataOpen || graphOpen ? "overflow-hidden" : "overflow-auto kiwi-scroll"}`}>
             <ErrorBoundary fallback={<ViewLoadError />}>
             <Suspense fallback={<ViewLoading />}>
             {basesOpen ? (

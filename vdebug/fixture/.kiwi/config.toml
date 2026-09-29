@@ -1,0 +1,13 @@
+# vdebug fixture config: mirrors the Mind reader's prod config (dante-config
+# ansible/files/kiwifs/config.toml) minus the ollama-backed vector search.
+[workspace]
+name = "Knowledge Base"
+template = "kb"
+
+[ui]
+start_page = "index/recent.md"
+
+[ui.features]
+edit = false
+history = false
+publish = false

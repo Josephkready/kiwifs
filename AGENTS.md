@@ -103,6 +103,43 @@ All PRs must pass the `test` CI check (go vet, go test, UI build) before merge.
 - **UI state** uses React context + localStorage. No global state library.
 - The frontend expects the API at the same origin (proxied in dev via Vite config).
 
+## Visual QA (video-debugger)
+
+`vdebug/` records the reader's core journeys as video + checkpoint frames across a
+mobile/tablet/desktop/ultrawide matrix, runs DOM layout checks at every mark, and
+(with `--judge`) has a multimodal model on OpenRouter review the recording.
+
+```bash
+make build                                   # or build ui/ + the Go binary however you like
+vdebug/serve_fixture.sh 38417 ./kiwifs       # throwaway copy of vdebug/fixture/ — never a real corpus
+python3 vdebug/vdebug.py list
+python3 vdebug/vdebug.py record --base-url http://127.0.0.1:38417 --viewports all --judge   # needs OPENROUTER_API_KEY + ffmpeg
+# read vdebug-runs/latest/report.md (gitignored)
+```
+
+- Flows live in `vdebug/flows/*.py` (helpers in `_helpers.py`); use role/label/testid locators, never CSS classes.
+- **After changing anything under `ui/`**, re-record the flows that touch those screens before opening a PR.
+- Python tests: `cd vdebug && python3 -m pytest -q` (`-m "not live"` skips real-browser tests).
+
+### Flow capture (what the reader collects)
+
+`kiwifs serve` injects `/_vd/recorder.js` into the UI shell; it POSTs semantic intent events
+(route changes, clicks, submits, scroll depth, JS errors) to `POST /api/_vd/events`, which
+`internal/vdcapture` (a Go port of `vdebug/capture/flowstore.py`'s ingest) validates and stores in SQLite.
+
+- **Never stored:** input values, query values, the raw user agent, any user id, note paths
+  (`/page/<path>` is kept as `/page/:path`), document titles, or accessible names inside
+  `[data-vd-mask]` regions (the note body, the sidebar tree, search results). Automated
+  browsers (`navigator.webdriver`) record nothing.
+- `KIWIFS_VD_FLOWS_DB` — db path, default `/var/lib/kiwifs/flows.db`. Must be a state path; a path
+  inside `--root` is refused (it would be public via `/raw/*`). If the db can't be opened, capture
+  switches itself off and the app runs normally.
+- `KIWIFS_VD_CAPTURE=0` disables capture; `KIWIFS_VD_SAMPLE=0..1` sets the fraction of sessions recorded.
+- Retention is a host job: run `flowstore.py prune --db <db> --days 30` daily (e.g. a systemd timer).
+- Inspect / mine / prune (same schema, `internal/vdcapture/schema.sql`):
+  `python3 vdebug/capture/flowstore.py stats|mine|prune --db /var/lib/kiwifs/flows.db`
+  (`mine --min-sessions 3 --out mined.json` → write `vdebug/flows/mined_<id>.py` → `promote`).
+
 ## What NOT To Do
 
 - Don't bypass the write pipeline. All file mutations must go through `internal/pipeline/`.

@@ -102,6 +102,7 @@ kiwifs init --template knowledge --root ./knowledge
 # Serve
 kiwifs serve --root ./knowledge
 # REST API on :3333, web UI at http://localhost:3333
+# (the web UI records anonymous usage flows; KIWIFS_VD_CAPTURE=0 turns this off — see SECURITY.md)
 
 # Write from an agent
 curl -X PUT 'localhost:3333/api/kiwi/file?path=pages/auth.md' \
