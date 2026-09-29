@@ -160,20 +160,29 @@ function darkSelector(): string {
  * Suppress all color transitions for the single frame around the class flip
  * so the swap is instant instead of passing through that mismatched state.
  */
+let suppressStyleEl: HTMLStyleElement | null = null;
+
 export function withoutColorTransitions(flip: () => void): void {
   if (typeof document === "undefined") {
     flip();
     return;
   }
-  const style = document.createElement("style");
-  style.textContent = "*, *::before, *::after { transition: none !important; }";
-  document.head.appendChild(style);
+  // Reuse one <style> tag across rapid back-to-back flips (e.g. a toggle
+  // double-click, or a manual toggle racing a prefers-color-scheme change)
+  // instead of appending a new one each time and leaving several scheduled
+  // for removal at once.
+  if (!suppressStyleEl) {
+    suppressStyleEl = document.createElement("style");
+    suppressStyleEl.textContent = "*, *::before, *::after { transition: none !important; }";
+    document.head.appendChild(suppressStyleEl);
+  }
   flip();
   // Force layout so the flip is committed under the suppression rule before
   // it's lifted on the next frame.
   void document.documentElement.offsetHeight;
   requestAnimationFrame(() => {
-    style.remove();
+    suppressStyleEl?.remove();
+    suppressStyleEl = null;
   });
 }
 

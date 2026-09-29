@@ -58,6 +58,7 @@ type Capture struct {
 	// One log budget per message class, so a flood of one kind can't mute another.
 	logRejected, logDropped, logFailed, logLimited atomic.Int64
 
+	retentionMu   sync.Mutex // guards start/stop of the loop below, incl. retentionStop itself
 	retentionStop chan struct{}
 	retentionOnce sync.Once
 	retentionWG   sync.WaitGroup
@@ -140,13 +141,21 @@ func (c *Capture) Close() error {
 // disables it. Safe to call at most once per Capture; a second call is a
 // no-op.
 func (c *Capture) StartRetention(days int) {
-	if c == nil || c.store == nil || days <= 0 {
+	if c == nil || c.store == nil {
 		return
 	}
+	if days <= 0 {
+		log.Printf("vdcapture: retention disabled (%s=%d)", EnvRetentionDays, days)
+		return
+	}
+	c.retentionMu.Lock()
 	if c.retentionStop != nil {
+		c.retentionMu.Unlock()
 		return
 	}
 	c.retentionStop = make(chan struct{})
+	c.retentionMu.Unlock()
+	log.Printf("vdcapture: retention enabled, pruning sessions idle > %d day(s), checked at most every %s", days, retentionInterval)
 	c.retentionWG.Add(1)
 	go func() {
 		defer c.retentionWG.Done()
@@ -176,10 +185,16 @@ func (c *Capture) pruneBestEffort(days int) {
 }
 
 func (c *Capture) stopRetention() {
-	if c == nil || c.retentionStop == nil {
+	if c == nil {
 		return
 	}
-	c.retentionOnce.Do(func() { close(c.retentionStop) })
+	c.retentionMu.Lock()
+	stop := c.retentionStop
+	c.retentionMu.Unlock()
+	if stop == nil {
+		return
+	}
+	c.retentionOnce.Do(func() { close(stop) })
 	c.retentionWG.Wait()
 }
 

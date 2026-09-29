@@ -17,6 +17,8 @@
 //	KIWIFS_VD_FLOWS_DB        SQLite path (default /var/lib/kiwifs/flows.db); refused
 //	                          inside --root; unopenable -> capture off, app unaffected
 //	KIWIFS_VD_SAMPLE          fraction of browser sessions recorded, 0..1 (default 1)
+//	KIWIFS_VD_RETENTION_DAYS  prune sessions idle longer than this, in-process, at most
+//	                          once/24h (default 30); 0 or negative disables pruning
 package vdcapture
 
 import (
