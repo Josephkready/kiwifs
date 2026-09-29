@@ -17,7 +17,7 @@ function ruleBodyFor(selector: string): string {
 }
 
 describe("kiwi-prose long-URL wrapping", () => {
-  it.each([".kiwi-prose p", ".kiwi-prose a", ".kiwi-prose li", ".kiwi-prose blockquote", ".kiwi-prose dd"])(
+  it.each([".kiwi-prose p", ".kiwi-prose a", ".kiwi-prose li", ".kiwi-prose blockquote", ".kiwi-prose dd", ".kiwi-prose dt"])(
     "%s allows breaking a long unbroken run of text (overflow-wrap: anywhere)",
     (selector) => {
       expect(ruleBodyFor(selector)).toMatch(/overflow-wrap:\s*anywhere/);

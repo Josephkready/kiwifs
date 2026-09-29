@@ -251,6 +251,7 @@
 }
 .kiwi-prose dt {
   @apply font-semibold mt-3 first:mt-0;
+  overflow-wrap: anywhere;
 }
 .kiwi-prose dd {
   @apply ml-6 text-foreground/80;
