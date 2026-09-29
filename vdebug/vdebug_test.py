@@ -44,6 +44,10 @@ def test_parse_viewports_presets_custom_and_all():
         vdebug.parse_viewports("watch")
 
 
+def test_parse_viewports_dedups_a_repeated_custom_spec():
+    assert [v.name for v in vdebug.parse_viewports("kiosk=2560x1600,kiosk=2560x1600")] == ["kiosk"]
+
+
 def test_video_size_caps_long_edge_and_stays_even():
     assert vdebug.video_size(vdebug.VIEWPORTS["iphone-13-pro"]) == {"width": 390, "height": 844}
     assert vdebug.video_size(vdebug.VIEWPORTS["4k"]) == {"width": 1920, "height": 1080}

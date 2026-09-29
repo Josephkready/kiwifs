@@ -19,6 +19,10 @@
 //	KIWIFS_VD_SAMPLE          fraction of browser sessions recorded, 0..1 (default 1)
 //	KIWIFS_VD_RETENTION_DAYS  prune sessions idle longer than this, in-process, at most
 //	                          once/24h (default 30); 0 or negative disables pruning
+//
+// A client can mint new session ids, so per-session/time-based limits aren't enough on
+// their own: MaxSessions/MaxEvents below are a hard, store-wide ceiling that refuses new
+// sessions once hit (existing sessions keep recording).
 package vdcapture
 
 import (
@@ -47,8 +51,9 @@ const (
 	MaxEventsPerBatch   = 500
 	MaxStr              = 200
 	MaxEventsPerSession = 5000
-	// ...and minting fresh session ids can't either: store-wide ceilings (new
-	// sessions are refused once hit; existing sessions keep recording).
+	// A runaway client minting fresh session ids can't grow the store without bound
+	// either: store-wide ceilings (new sessions are refused once hit; existing
+	// sessions keep recording).
 	MaxSessions = 20_000
 	MaxEvents   = 1_000_000
 )

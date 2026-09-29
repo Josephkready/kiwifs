@@ -93,7 +93,9 @@ def parse_viewports(spec: str) -> list[Viewport]:
         if not m:
             raise ValueError(f"unknown viewport {part!r} (presets: {', '.join(VIEWPORTS)}, or NAME=WxH)")
         w, h = int(m.group(2)), int(m.group(3))
-        out.append(Viewport(m.group(1) or f"{w}x{h}", w, h, mobile=w < 768))
+        vp = Viewport(m.group(1) or f"{w}x{h}", w, h, mobile=w < 768)
+        if vp not in out:
+            out.append(vp)
     return out
 
 
