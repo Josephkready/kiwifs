@@ -521,6 +521,40 @@
 }
 @media (pointer: coarse) {
   .group .opacity-0.group-hover\:opacity-100 { opacity: 1; }
+
+  /* iOS Safari zooms the page on focus when a text input computes under
+     16px. Force >=16px on every text input/textarea/select on touch
+     devices (phone AND tablet — a `md:` breakpoint alone is wrong since
+     iPad is 834px wide). Desktop sizes are untouched: this rule only
+     lives in the (pointer: coarse) media query, and it's unlayered CSS
+     so it outranks Tailwind's layered `text-xs`/`text-sm` utilities
+     without needing `!important`. NEVER pair this with maximum-scale /
+     user-scalable=no in index.html — that disables pinch-zoom instead
+     of fixing the underlying font size. */
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+
+  /* Search dialog: anchor near the top of the viewport instead of
+     vertically centering on the layout viewport. Centering against the
+     layout viewport (which keeps its full height when the on-screen
+     keyboard opens) pushes the dialog's bottom under the keyboard; anchor
+     it near the top instead so the height cap applied inline via
+     `computeSearchDialogMaxHeight` (against the *visual* viewport, which
+     does shrink) keeps the whole dialog above the keyboard. */
+  .kiwi-search-dialog {
+    top: 1rem;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* The keyboard-shortcut hint footer is meaningless on touch and, on
+     narrow phones, wraps to two lines that eat into the space the results
+     list needs above the keyboard. */
+  .kiwi-search-footer-hint {
+    display: none;
+  }
 }
 
 /* ─── Print / PDF export ─── */

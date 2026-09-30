@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Calendar, Clock, File, Filter, FolderOpen, X } from "lucide-react";
 import {
   CommandDialog,
@@ -16,6 +16,12 @@ import {
   parseFieldFilters,
   type SearchHit as Hit,
 } from "@kw/lib/searchQuery";
+import { useCoarsePointer } from "@kw/hooks/useCoarsePointer";
+import { useVisualViewportHeight } from "@kw/hooks/useVisualViewportHeight";
+import {
+  computeSearchDialogMaxHeight,
+  computeSearchListMaxHeight,
+} from "@kw/lib/viewportKeyboard";
 
 const RECENT_KEY = "kiwi:recent-searches";
 const MAX_RECENT = 8;
@@ -71,6 +77,34 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
   const [recents, setRecents] = useState<string[]>([]);
   const debounce = useRef<number | null>(null);
   const requestId = useRef(0);
+
+  // Keep the dialog and its results list inside the *visual* viewport
+  // (not the layout viewport, which keeps its full height when the
+  // on-screen keyboard opens) — see viewportKeyboard.ts.
+  const isCoarse = useCoarsePointer();
+  const viewportHeight = useVisualViewportHeight();
+  const chromeAboveListRef = useRef<HTMLDivElement | null>(null);
+  const [chromeAboveListHeight, setChromeAboveListHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    if (!open || !isCoarse) return;
+    const el = chromeAboveListRef.current;
+    if (!el) return;
+    const measure = () => setChromeAboveListHeight(el.getBoundingClientRect().height);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [open, isCoarse]);
+
+  const dialogMaxHeight = computeSearchDialogMaxHeight({ viewportHeight, isCoarse });
+  const listMaxHeight = computeSearchListMaxHeight({
+    viewportHeight,
+    chromeAboveList: chromeAboveListHeight,
+    chromeBelowList: 0, // the hint footer is hidden on touch via CSS
+    isCoarse,
+  });
 
   const dirs = topDirs(tree);
 
@@ -138,7 +172,10 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
       open={open}
       onOpenChange={onOpenChange}
       commandProps={{ shouldFilter: false }}
+      contentClassName="kiwi-search-dialog"
+      contentStyle={dialogMaxHeight !== undefined ? { maxHeight: dialogMaxHeight } : undefined}
     >
+      <div ref={chromeAboveListRef}>
       <CommandInput
         placeholder="Search…"
         value={query}
@@ -202,7 +239,8 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
           </>
         )}
       </div>
-      <CommandList data-vd-mask>
+      </div>
+      <CommandList data-vd-mask style={{ maxHeight: listMaxHeight }}>
         {!query.trim() && recents.length > 0 && (
           <CommandGroup heading="Recent searches">
             {recents.map((q) => (
@@ -283,7 +321,7 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
           </CommandItem>
         ))}
       </CommandList>
-      <div className="text-[11px] text-muted-foreground px-3 py-2 border-t border-border flex justify-between">
+      <div className="kiwi-search-footer-hint text-[11px] text-muted-foreground px-3 py-2 border-t border-border flex justify-between">
         <span>↑↓ navigate · enter to open · esc to close · <code className="font-mono">field:value</code> to filter</span>
         <span>
           {loading
