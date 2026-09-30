@@ -7,8 +7,6 @@
 - The knowledge graph's force-directed layout settles for a moment (nodes still drifting)
   before "Fit graph" is clicked; that settling motion is expected, not a glitch.
 - Task-list checkboxes in a rendered note are disabled by design (the reader is read-only).
-  The knowledge graph's option checkboxes are disabled controls sitting inside larger
-  clickable labels; that is also intentional.
 - Long node labels in the knowledge graph are truncated with an ellipsis and shown in full
   on hover — this is not clipped text.
 - Before "Fit graph" is pressed the force layout can leave a node near an edge with its label
