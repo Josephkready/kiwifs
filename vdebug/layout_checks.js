@@ -45,8 +45,11 @@
     alphaMemo.set(el, a);
     return a;
   };
+  // checkVisibility() is false inside a closed <details> (content-visibility:hidden): those
+  // boxes can still report a layout rect, but nothing there is painted or tappable.
   const visible = (el, cs) => {
     if (cs.display === "none" || cs.visibility === "hidden" || alphaOf(el) <= 0.05) return false;
+    if (el.checkVisibility && el.checkVisibility() === false) return false;
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   };
@@ -75,6 +78,11 @@
     }
     return { left, top, right, bottom };
   };
+  // Hit test at (x, y): does a tap there reach `el`? Off-viewport points can't be tested (null).
+  // The keyboard panel is pointer-events:none, so elementFromPoint already looks through it.
+  const hitAt = (x, y) => (x >= 0 && y >= 0 && x < vw && y < vh) ? document.elementFromPoint(x, y) : null;
+  const reaches = (top, el) => el === top || el.contains(top) || top.contains(el);
+  const inModal = (el) => !!el.closest('dialog[open],[aria-modal="true"]');
   // An ancestor that clips or scrolls horizontally makes overflow intentional.
   const clippedX = (el) => {
     for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
@@ -139,8 +147,14 @@
           hit[1] = Math.max(hit[1], parseFloat(ps.height) || 0);
         }
       }
+      // WCAG 2.5.8's inline exception: a link inside a sentence is sized by the text around it.
+      // Only a link in RUNNING text counts (its parent has its own words beside it); a
+      // standalone inline link ("View in Mind", alone in a card footer) is a real small target.
+      const inText = el.tagName === "A" && cs.display === "inline" && el.parentElement
+        && [...el.parentElement.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+      // Disabled controls can't be tapped, so their size doesn't matter.
       // Touch screens, not a width guess: the iPad Pro 11" (834px) is a touch viewport too.
-      if (touch && (hit[0] < 24 || hit[1] < 24) && r.top < vh * 3 && !(el.tagName === "A" && cs.display === "inline")) {
+      if (touch && (hit[0] < 24 || hit[1] < 24) && r.top < vh * 3 && !inText && !el.matches(":disabled")) {
         const painted = `${Math.round(r.width)}x${Math.round(r.height)}`;
         const eff = `${Math.round(hit[0])}x${Math.round(hit[1])}`;
         add("small-tap-target", el, eff === painted ? `${painted}px < 24x24`
@@ -162,6 +176,15 @@
     if (r.width <= 1 || r.height <= 1) continue;  // 1x1 visually-hidden (skip-link) pattern
     const alpha = alphaOf(el);
     if (alpha > 0.05) continue;
+    // The standard custom radio/checkbox: the real input is faded out inside a visible <label>
+    // that is bigger than it (a "pill"). A tap on the label is supposed to reach the input.
+    if (el.matches("input[type=radio],input[type=checkbox]")) {
+      const label = el.closest("label");
+      if (label && alphaOf(label) > 0.05 && getComputedStyle(label).visibility !== "hidden") {
+        const lr = label.getBoundingClientRect();
+        if (lr.width >= r.width && lr.height >= r.height && lr.width * lr.height > r.width * r.height) continue;
+      }
+    }
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     if (cx < 0 || cy < 0 || cx >= vw || cy >= vh) continue;
     const top = document.elementFromPoint(cx, cy);
@@ -175,6 +198,8 @@
     for (let j = i + 1; j < interactive.length; j++) {
       const a = interactive[i], b = interactive[j];
       if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
+      // A dialog's controls lying over page controls is the dialog doing its job, not a collision.
+      if (inModal(a.el) !== inModal(b.el)) continue;
       const ix = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
       const iy = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
       if (ix > 4 && iy > 4) {
@@ -182,8 +207,18 @@
         // modal/sheet/backdrop covering both), neither control is reachable, so they don't
         // collide. Off-viewport points can't be hit-tested; judge those on geometry alone.
         const cx = Math.max(a.r.left, b.r.left) + ix / 2, cy = Math.max(a.r.top, b.r.top) + iy / 2;
-        const top = (cx >= 0 && cy >= 0 && cx < vw && cy < vh) ? document.elementFromPoint(cx, cy) : null;
-        if (top && !a.el.contains(top) && !b.el.contains(top) && !top.contains(a.el) && !top.contains(b.el)) continue;
+        const top = hitAt(cx, cy);
+        if (top && !reaches(top, a.el) && !reaches(top, b.el)) continue;
+        // The control underneath at the overlap: if something ELSE (a drawer, a sheet) covers it
+        // at its own centre too, the user can't hit it anyway, so there's nothing to collide
+        // with. If the upper control itself covers that centre, the overlap is eating its taps:
+        // keep reporting it.
+        const upper = top && a.el.contains(top) ? a : top && b.el.contains(top) ? b : null;
+        const lower = upper === a ? b : upper === b ? a : null;
+        if (lower) {
+          const lt = hitAt((lower.r.left + lower.r.right) / 2, (lower.r.top + lower.r.bottom) / 2);
+          if (lt && !reaches(lt, lower.el) && !upper.el.contains(lt)) continue;  // contains(): the drawer holding `upper` doesn't count
+        }
         add("overlapping-controls", a.el, `overlaps ${sel(b.el)} by ${Math.round(ix)}x${Math.round(iy)}px`);
         break;
       }
@@ -191,13 +226,32 @@
   }
   // 7. Touch devices: iOS Safari zooms the whole page when a field whose text is < 16px gets
   //    focus (and doesn't zoom back). Deterministic cause, so check it at every mark.
-  if (navigator.maxTouchPoints > 0) {
+  //    A viewport meta with maximum-scale<=1 / user-scalable=no stops that zoom, but also stops
+  //    the user's pinch-zoom (a WCAG 1.4.4 failure): that page gets ONE zoom-disabled hit
+  //    instead of per-input hits, since the fix is the same either way (16px inputs, zoom on).
+  const zoomOff = (() => {
+    const m = document.querySelector('meta[name="viewport"]');
+    const kv = {};
+    for (const part of ((m && m.getAttribute("content")) || "").split(/[,;]/)) {
+      const [k, v] = part.split("=").map(x => (x || "").trim().toLowerCase());
+      if (k) kv[k] = v;
+    }
+    const max = parseFloat(kv["maximum-scale"]);
+    return (!isNaN(max) && max <= 1) || kv["user-scalable"] === "no" || kv["user-scalable"] === "0"
+      ? m.getAttribute("content") : null;
+  })();
+  if (navigator.maxTouchPoints > 0 && zoomOff) {
+    add("zoom-disabled", null, `viewport "${zoomOff}": pinch-zoom is disabled (WCAG 1.4.4); use 16px inputs instead`);
+  } else if (navigator.maxTouchPoints > 0) {
     for (const el of document.querySelectorAll(
         "input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=range])" +
         ":not([type=button]):not([type=submit]):not([type=color]):not([type=file]),textarea,select")) {
       if (el.closest('[inert],[aria-hidden="true"]')) continue;
       const cs = getComputedStyle(el);
       if (!visible(el, cs) || el.disabled) continue;
+      // Only fields the user can reach now: a collapsed sidebar parks its search box off-screen.
+      const r = el.getBoundingClientRect();
+      if (r.right <= 0 || r.left >= vw) continue;
       const px = parseFloat(cs.fontSize);
       if (px < 16) add("ios-input-zoom", el, `font-size ${px}px < 16px: iOS zooms the page when this field is focused`);
     }
@@ -215,22 +269,43 @@
       }
     }
     // Page content under the keyboard can be scrolled up; fixed/sticky controls can't.
-    const pinned = (el) => {
-      for (let p = el; p && p !== document.documentElement; p = p.parentElement) {
+    // The walk stops at body/html: a scroll lock sets `body{position:fixed}`, which would make
+    // every control on the page look pinned.
+    const pinnedBy = (el) => {
+      for (let p = el; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
         const pos = getComputedStyle(p).position;
-        if (pos === "fixed" || pos === "sticky") return true;
+        if (pos === "fixed" || pos === "sticky") return p;
+      }
+      return null;
+    };
+    // A pinned panel with its own scroller (a sheet's body) can still scroll the control up:
+    // if that scroller clips it, or already ends above the keyboard, it's reachable.
+    const scrollable = (p) => /(auto|scroll|overlay)/.test(getComputedStyle(p).overflowY) && p.scrollHeight > p.clientHeight + 1;
+    const scrollsIntoView = (el, r, pin) => {
+      if (pin === el) return false;
+      for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+        if (scrollable(p)) {
+          const sr = p.getBoundingClientRect();
+          return r.bottom <= sr.top || r.top >= sr.bottom || sr.bottom <= kbTop;
+        }
+        if (p === pin) return false;
       }
       return false;
     };
     for (const el of document.querySelectorAll("a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link]")) {
       if (el === f || el.closest("#__vd_keyboard") || el.closest('[inert],[aria-hidden="true"]')) continue;
       const cs = getComputedStyle(el);
-      if (!visible(el, cs) || !pinned(el)) continue;
+      if (!visible(el, cs)) continue;
+      const pin = pinnedBy(el);
+      if (!pin) continue;
       const r = el.getBoundingClientRect();
       const hidden = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, kbTop);
-      if (hidden > r.height / 2) {
-        add("keyboard-covers-control", el, `pinned control: ${Math.round(hidden)} of ${Math.round(r.height)}px behind the open keyboard`);
-      }
+      if (hidden <= r.height / 2 || scrollsIntoView(el, r, pin)) continue;
+      // Already covered by something else (a full-screen player, a drawer): the keyboard isn't
+      // what hides it. Same hit test as overlapping-controls; the panel itself is see-through.
+      const top = hitAt(r.left + r.width / 2, r.top + r.height / 2);
+      if (top && !reaches(top, el)) continue;
+      add("keyboard-covers-control", el, `pinned control: ${Math.round(hidden)} of ${Math.round(r.height)}px behind the open keyboard`);
     }
   }
   return issues;

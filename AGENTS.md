@@ -120,8 +120,10 @@ python3 vdebug/vdebug.py record --base-url http://127.0.0.1:38417 --viewports al
 
 - Flows live in `vdebug/flows/*.py` (helpers in `_helpers.py`); use role/label/testid locators, never CSS classes.
 - On `iphone-13-pro` / `ipad-pro-11` vdebug simulates the on-screen keyboard (`vdebug/keyboard.js`): focusing a
-  text field shrinks `visualViewport` and draws a keyboard panel; `keyboard-covers-focus`, `keyboard-covers-control`
-  and `ios-input-zoom` (inputs under 16px) run at each mark. The `search`, `sidebar-filter` and `graph-highlight`
+  text field shrinks `visualViewport`, draws a keyboard panel (top layer, above modal dialogs) and brings the field
+  above it (its own scroller first; the page only when the field isn't in a fixed/sticky container, undone on close);
+  `keyboard-covers-focus`, `keyboard-covers-control`, `ios-input-zoom` (on-screen inputs under 16px) and
+  `zoom-disabled` (a viewport meta that blocks pinch-zoom) run at each mark. The `search`, `sidebar-filter` and `graph-highlight`
   flows type while it is up; any new text-entry UI needs a flow that clicks the field, types and marks.
   A flow can opt out with `KEYBOARD = False`.
 - **After changing anything under `ui/`**, re-record the flows that touch those screens before opening a PR.
