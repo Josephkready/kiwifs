@@ -4,36 +4,145 @@
      - #msg / #send live in a position:fixed bottom bar that ignores the keyboard, so on a phone
        both end up behind it (keyboard-covers-focus + keyboard-covers-control). With ?aware=1 the
        bar follows window.visualViewport like a correctly built app, and nothing is covered.
+     - #draft is a position:sticky "Save draft" button pinned above the bar: also covered, also
+       lifted with ?aware=1.
      - #note has a 13px font: iOS zooms the page when it's focused (ios-input-zoom).
-     NOT bugs: #agree / #plan-a (a checkbox and a radio never open a keyboard), #name (16px) and #late, a field far down the page that the keyboard scrolls into
-     view (like a phone does), so it stays visible above the keyboard. -->
+     NOT bugs: #agree / #plan-a (a checkbox and a radio never open a keyboard), #name (16px) and
+     #late, a field far down the page that the keyboard scrolls into view (like a phone does), so
+     it stays visible above the keyboard.
+
+     ?case=NAME (repeatable) reveals one of the hidden [data-case] sections below, so each test
+     sees only its own fixture and the default page stays as described above:
+     - lock:    body scroll lock (body{position:fixed}); #lock-btn is plain page content under the
+                keyboard, NOT a pinned control.
+     - sheet:   a fixed sheet whose scroll body clips #sheet-more (the sheet's own background is
+                what sits at its centre): reachable by scrolling the body.
+     - drawer:  a full-screen fixed drawer with its own scroller; #drawer-deep sits under the
+                keyboard, so keyboard.js must scroll the DRAWER (not the page) to reveal it.
+     - cover:   a full-screen player over the page: #send / #draft are covered by it, not by the
+                keyboard. Its own pinned #player-play IS under the keyboard (a real bug).
+     - modal:   a modal bottom-sheet <dialog> with a blurred ::backdrop; #dlg-ok sits under the
+                keyboard. #under-dlg is a page button right under #dlg-ok (not a collision).
+     - overlap: overlapping-controls probes (see the section).
+     - targets: tap-target / invisible-hit-target / ios-input-zoom probes (see the section).
+     - nozoom:  the viewport meta disables zoom (maximum-scale=1): one zoom-disabled hit. -->
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Keyboard fixture</title>
 <style>
   body { font-family: sans-serif; margin: 0; }
+  body.locked { position: fixed; left: 0; right: 0; top: 0; }
   main { padding: 12px 12px 90px; }
   label { display: block; margin: 12px 0; }
   input { font-size: 16px; }
   #note { font-size: 13px; }
-  .spacer { height: 1400px; background: linear-gradient(#fff, #eef); }
+  .spacer { height: 700px; background: linear-gradient(#fff, #eef); }
+  #draft { display: block; position: sticky; bottom: 64px; margin-left: auto; }
   #bar { position: fixed; left: 0; right: 0; bottom: 0; height: 56px; display: flex; gap: 8px; align-items: center;
          padding: 0 8px; background: #234; }
   #bar input { flex: 1; }
+  #sheet { position: fixed; left: 0; right: 0; top: 0; height: 700px; background: #fff; z-index: 5; }
+  #sheet-body { height: 400px; overflow: auto; padding: 8px; box-sizing: border-box; }
+  #drawer { position: fixed; inset: 0; overflow: auto; background: #fff; z-index: 6; padding: 8px; }
+  #player { position: fixed; inset: 0; background: #111; z-index: 20; padding: 8px; }
+  #player-play { position: absolute; left: 16px; bottom: 24px; }
+  #dlg { position: fixed; inset: auto 0 0 0; margin: 0; width: 100%; max-width: none; height: 400px;
+         box-sizing: border-box; padding: 12px; border: 0; }
+  #dlg::backdrop { background: rgba(0, 0, 40, .4); backdrop-filter: blur(3px); }
+  #dlg-ok { position: absolute; left: 16px; bottom: 16px; width: 120px; height: 40px; }
+  #under-dlg { position: absolute; left: 36px; top: 798px; width: 80px; height: 20px; }
+  /* overlap probes, absolutely placed so the geometry is exact */
+  [data-case=overlap] { position: relative; height: 300px; }
+  [data-case=overlap] button { position: absolute; height: 32px; margin: 0; }
+  #cover-a { left: 0; top: 0; width: 100px; } #cover-b { left: 20px; top: 0; width: 60px; }
+  #page-btn { left: 20px; top: 60px; width: 100px; }
+  #ov-drawer { position: absolute; left: 0; top: 50px; width: 80px; height: 60px; background: #ccd; z-index: 1; }
+  #ov-drawer button { left: 0; top: 10px; width: 40px; }
+  details button { position: absolute; top: 140px; width: 80px; } #det-a { left: 0; } #det-b { left: 40px; }
+  /* target probes */
+  .pill { display: inline-block; position: relative; padding: 12px 20px; border: 1px solid #888; border-radius: 20px; }
+  .pill input { position: absolute; left: 6px; top: 6px; margin: 0; opacity: 0; }
+  #side { position: absolute; left: -264px; top: 0; width: 260px; }
+  #side-search { font-size: 13px; }
+  .tiny16 { width: 16px; height: 16px; padding: 0; }
 </style></head>
 <body>
 <main>
+  <section data-case="lock" hidden>
+    <label>Filter <input id="lock-field"></label>
+    <div style="height: 520px"></div>
+    <button id="lock-btn">Continue</button>
+  </section>
+  <section data-case="overlap" hidden>
+    <!-- BUG: #cover-b sits over #cover-a's centre, so it eats #cover-a's taps. -->
+    <button id="cover-a">A</button><button id="cover-b">B</button>
+    <!-- NOT a bug: a non-modal drawer overlaps #page-btn, and the drawer panel covers
+         #page-btn's centre: the user can't hit #page-btn anyway. -->
+    <button id="page-btn">Page</button>
+    <div id="ov-drawer"><button id="drawer-btn">Menu</button></div>
+    <!-- NOT a bug: overlapping buttons inside a CLOSED <details> aren't painted. -->
+    <details><summary>More</summary><button id="det-a">One</button><button id="det-b">Two</button></details>
+  </section>
+  <section data-case="targets" hidden>
+    <!-- NOT a bug: the standard custom radio, an opacity-0 input inside a bigger visible label. -->
+    <label class="pill"><input type="radio" name="bill" id="pill-radio"> Monthly</label>
+    <!-- BUG: an opacity-0 checkbox with no label around it still eats taps. -->
+    <input type="checkbox" id="bare-ghost" aria-label="Ghost" style="opacity: 0">
+    <!-- BUG: a standalone inline link is a small target. NOT a bug: a link in running text. -->
+    <div><a href="#mind" id="view-link" style="font-size: 14px">View in Mind</a></div>
+    <p>See the <a href="#docs" id="text-link">docs</a> for more.</p>
+    <!-- NOT a bug: a disabled tiny button. BUG: the same button enabled. -->
+    <button id="tiny-off" class="tiny16" disabled></button> <button id="tiny-on" class="tiny16"></button>
+    <!-- NOT a bug: a 13px search box in a collapsed sidebar parked off-screen at x=-264. -->
+    <aside id="side"><input id="side-search" aria-label="Search"></aside>
+  </section>
   <label>Name <input id="name"></label>
   <label>Note <input id="note"></label>
   <label><input type="checkbox" id="agree"> Agree</label>
   <label><input type="radio" name="plan" id="plan-a"> Plan A</label>
   <div class="spacer"></div>
+  <label>Middle field <input id="mid"></label>
+  <div class="spacer"></div>
   <label>Last field <input id="late"></label>
+  <button id="draft">Save draft</button>
 </main>
 <div id="bar"><input id="msg" aria-label="Message"><button id="send">Send</button></div>
+<div id="sheet" data-case="sheet" hidden>
+  <div id="sheet-body">
+    <label>Search <input id="sheet-field"></label>
+    <div style="height: 480px"></div>
+    <button id="sheet-more">Load more</button>
+  </div>
+</div>
+<div id="drawer" data-case="drawer" hidden>
+  <div style="height: 640px"></div>
+  <input id="drawer-deep" aria-label="Deep field">
+  <div style="height: 800px"></div>
+</div>
+<div id="player" data-case="cover" hidden>
+  <input id="player-search" aria-label="Search videos">
+  <button id="player-play">Play</button>
+</div>
+<div data-case="modal" hidden><button id="under-dlg">Behind</button></div>
+<dialog id="dlg" aria-label="Edit">
+  <label>Title <input id="dlg-field"></label>
+  <button id="dlg-ok" onclick="window.__dlgOk = true">Save</button>
+</dialog>
 <script>
-  if (location.search.includes("aware=1") && window.visualViewport) {
-    const bar = document.getElementById("bar");
-    const lift = () => { bar.style.bottom = (window.innerHeight - window.visualViewport.height) + "px"; };
+  const params = new URLSearchParams(location.search);
+  for (const c of params.getAll("case")) {
+    document.querySelectorAll(`[data-case="${c}"]`).forEach((el) => el.removeAttribute("hidden"));
+  }
+  if (params.getAll("case").includes("lock")) document.body.classList.add("locked");
+  if (params.getAll("case").includes("nozoom")) {
+    document.querySelector('meta[name="viewport"]').content = "width=device-width, initial-scale=1, maximum-scale=1";
+  }
+  if (params.get("aware") === "1" && window.visualViewport) {
+    const bar = document.getElementById("bar"), draft = document.getElementById("draft");
+    const lift = () => {
+      const kb = window.innerHeight - window.visualViewport.height;
+      bar.style.bottom = kb + "px";
+      draft.style.bottom = (64 + kb) + "px";
+    };
     window.visualViewport.addEventListener("resize", lift);
   }
 </script>
