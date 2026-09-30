@@ -13,7 +13,9 @@ const css = readFileSync(cssPath, "utf-8");
 function coarseSearchDialogRule(): string {
   const start = css.indexOf("@media (pointer: coarse)");
   expect(start).toBeGreaterThanOrEqual(0);
-  const match = css.slice(start).match(/\.kiwi-search-dialog\s*\{([^}]*)\}/);
+  const end = css.indexOf("\n}", start); // the media block's closing brace (column 0)
+  expect(end).toBeGreaterThan(start);
+  const match = css.slice(start, end).match(/\.kiwi-search-dialog\s*\{([^}]*)\}/);
   if (!match) throw new Error(".kiwi-search-dialog rule not found in the coarse-pointer block");
   return match[1].replace(/\/\*[\s\S]*?\*\//g, "");
 }
