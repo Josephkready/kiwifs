@@ -557,7 +557,12 @@
      dialog's normal overflow-hidden. */
   .kiwi-search-dialog {
     top: 16px;
-    transform: translateX(-50%) translateY(0);
+    /* Tailwind v4's translate-x/y utilities write the standalone `translate`
+       property, not `transform`. Override `translate` (keep the horizontal
+       centring, drop the vertical -50%) and leave `transform` alone: setting
+       `transform: translateX(-50%)` ADDS to the utility's translate, which put
+       the dialog half off the top and left of the screen (kiwifs#14). */
+    translate: -50% 0;
     overflow-y: auto;
   }
 
