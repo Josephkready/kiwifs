@@ -877,30 +877,30 @@ export function KiwiGraph({ tree, activePath, onNavigate, onClose }: Props) {
             </SelectContent>
           </Select>
         </div>
-        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+        <label className="flex items-center gap-1.5 min-h-6 cursor-pointer select-none">
           <input
             type="checkbox"
             checked={sizeByPageRank}
             onChange={(e) => setSizeByPageRank(e.target.checked)}
-            className="accent-primary h-3 w-3"
+            className="accent-primary h-6 w-6"
           />
           Size by PageRank
         </label>
-        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+        <label className="flex items-center gap-1.5 min-h-6 cursor-pointer select-none">
           <input
             type="checkbox"
             checked={colorByCommunity}
             onChange={(e) => setColorByCommunity(e.target.checked)}
-            className="accent-primary h-3 w-3"
+            className="accent-primary h-6 w-6"
           />
           Color by community
         </label>
-        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+        <label className="flex items-center gap-1.5 min-h-6 cursor-pointer select-none">
           <input
             type="checkbox"
             checked={showLinks}
             onChange={(e) => setShowLinks(e.target.checked)}
-            className="accent-primary h-3 w-3"
+            className="accent-primary h-6 w-6"
           />
           Show links
         </label>

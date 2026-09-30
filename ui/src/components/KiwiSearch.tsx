@@ -233,7 +233,7 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
             {parseFieldFilters(query).filters.map((f, i) => (
               <span
                 key={i}
-                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs bg-primary/10 text-primary border-primary/30"
+                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs bg-primary/10 text-primary-foreground dark:text-primary border-primary/30"
               >
                 {f.field.slice(2)}={f.value}
               </span>
