@@ -58,6 +58,10 @@ SESSION_ID = re.compile(r"[A-Za-z0-9]{8,64}")  # ASCII only (str.isalnum() accep
 PRUNE_INTERVAL_S = 24 * 3600
 
 _last_prune: dict[str, float] = {}  # path -> monotonic time of the last lazy prune
+# path -> (events in the store, monotonic time counted). COUNT(*) is a full scan, so the ceiling
+# check uses this per-process estimate: refreshed every EVENT_COUNT_TTL_S, bumped on each insert.
+_event_count: dict[str, tuple[int, float]] = {}
+EVENT_COUNT_TTL_S = 60.0
 _lock = threading.Lock()
 
 
@@ -141,6 +145,7 @@ class FlowStore:
         if not self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions'").fetchone():
             self.db.executescript(SCHEMA.read_text())
         self.last_ingest: dict | None = None
+        self.last_prune_count: int | None = None  # sessions removed by the lazy prune on this open
         if prune_days is not None:
             now = time.monotonic()
             with _lock:
@@ -148,7 +153,7 @@ class FlowStore:
                 if due:
                     _last_prune[self.path] = now
             if due:
-                self.prune(prune_days)
+                self.last_prune_count = self.prune(prune_days)
 
     def close(self) -> None:
         self.db.close()
@@ -179,23 +184,26 @@ class FlowStore:
                 "SELECT event_count FROM sessions WHERE id = ?", (sid,)
             ).fetchone()
             if row is None:
-                n_sessions, n_events = self.db.execute(
-                    "SELECT (SELECT COUNT(*) FROM sessions), (SELECT COUNT(*) FROM events)").fetchone()
-                if n_sessions >= MAX_SESSIONS or n_events >= MAX_EVENTS:
+                n_sessions = self.db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]  # <= 20k rows
+                if n_sessions >= MAX_SESSIONS or self._events_total() >= MAX_EVENTS:
                     self.last_ingest = {"stored": 0, "duplicate": 0, "invalid": 0, "capped": True}
                     return 0
+                # OR IGNORE: two first batches of one session can race (the recorder flushes on a
+                # timer AND on pagehide); the loser joins the row the winner created.
                 self.db.execute(
-                    "INSERT INTO sessions (id, started_at, last_seen_at, viewport_w, viewport_h, ua_class)"
+                    "INSERT OR IGNORE INTO sessions (id, started_at, last_seen_at, viewport_w, viewport_h, ua_class)"
                     " VALUES (?, ?, ?, ?, ?, ?)",
                     (sid, now, now, vw, vh, ua_class(user_agent, vw)),
                 )
-                count = 0
+                count = self.db.execute("SELECT event_count FROM sessions WHERE id = ?", (sid,)).fetchone()[0]
             else:
                 count = row["event_count"]
             stored = invalid = duplicate = 0
             capped = False
+            # The store-wide ceiling applies to existing sessions too, not only to new ones.
+            room = MAX_EVENTS - self._events_total()
             for ev in events:
-                if count + stored >= MAX_EVENTS_PER_SESSION:
+                if count + stored >= MAX_EVENTS_PER_SESSION or stored >= room:
                     capped = True
                     break
                 if not isinstance(ev, dict) or ev.get("type") not in EVENT_TYPES:
@@ -219,14 +227,33 @@ class FlowStore:
                 "UPDATE sessions SET last_seen_at = ?, event_count = event_count + ? WHERE id = ?",
                 (now, stored, sid),
             )
+        # Only after the transaction committed: a rollback must not inflate the cached count.
+        with _lock:
+            total, t = _event_count.get(self.path, (0, 0.0))
+            _event_count[self.path] = (total + stored, t)
         self.last_ingest = {"stored": stored, "duplicate": duplicate, "invalid": invalid, "capped": capped}
         return stored
+
+    def _events_total(self) -> int:
+        """Events in the store: a cached count (see _event_count), recounted when stale."""
+        now = time.monotonic()
+        with _lock:
+            cached = _event_count.get(self.path)
+        if cached is None or now - cached[1] > EVENT_COUNT_TTL_S:
+            n = self.db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            with _lock:
+                _event_count[self.path] = (n, now)
+            return n
+        return cached[0]
 
     def prune(self, days: int) -> int:
         """Delete sessions (and their events) not seen for `days`. Returns sessions removed."""
         cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).isoformat(timespec="seconds")
         with self.db:
-            return self.db.execute("DELETE FROM sessions WHERE last_seen_at < ?", (cutoff,)).rowcount
+            removed = self.db.execute("DELETE FROM sessions WHERE last_seen_at < ?", (cutoff,)).rowcount
+        with _lock:
+            _event_count.pop(self.path, None)  # events cascaded away: recount next time
+        return removed
 
     # ---------------------------------------------------------------- mining
     def session_events(self, sid: str) -> list[dict]:

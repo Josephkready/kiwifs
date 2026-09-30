@@ -119,8 +119,12 @@ python3 vdebug/vdebug.py record --base-url http://127.0.0.1:38417 --viewports al
 ```
 
 - Flows live in `vdebug/flows/*.py` (helpers in `_helpers.py`); use role/label/testid locators, never CSS classes.
+- On `iphone-13-pro` / `ipad-pro-11` vdebug simulates the on-screen keyboard (`vdebug/keyboard.js`): focusing a
+  text field shrinks `visualViewport` and draws a keyboard panel; `keyboard-covers-focus`, `keyboard-covers-control`
+  and `ios-input-zoom` (inputs under 16px) run at each mark. The `search`, `sidebar-filter` and `graph-highlight`
+  flows type while it is up; any new text-entry UI needs a flow that clicks the field, types and marks.
 - **After changing anything under `ui/`**, re-record the flows that touch those screens before opening a PR.
-- Python tests: `cd vdebug && python3 -m pytest -q` (`-m "not live"` skips real-browser tests).
+- Python tests: `cd vdebug && python3 -m pytest -q` (`-m "not browser"` skips real-browser tests).
 - `vdebug/judge_notes.md` lists intentional design (scrollable overflow regions, the sticky
   breadcrumb, the graph's force-layout settle, etc.) the judge must not flag as a bug.
 

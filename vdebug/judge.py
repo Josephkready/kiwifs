@@ -4,7 +4,10 @@
 Used by `vdebug.py record --judge`, or standalone to re-judge an existing run
 (e.g. with another model) without re-recording:
 
-    judge.py vdebug-runs/<run-id> [--model openai/gpt-6-luna] [--fps 10]
+    judge.py vdebug-runs/<run-id> [--model openai/gpt-6-luna] [--fps 10] [--notes vdebug/judge_notes.md]
+
+`--notes` (default: judge_notes.md beside this file) is intentional design the judge must not
+report; it's sent with every request (4000 characters max).
 
 Stdlib only (urllib) + the ffmpeg binary. Needs OPENROUTER_API_KEY.
 
@@ -137,6 +140,11 @@ Rules:
 - The flow description says what the test script does. If the frames disagree with it, trust
   the frames; report a defect only when the APP visibly misbehaves, not because the description
   was incomplete.
+- On phone/tablet recordings, a plain grey keyboard panel at the bottom is a SIMULATED on-screen
+  keyboard (shown while a text field has focus). Don't report the keyboard itself. DO report what
+  it breaks: the field being typed in hidden behind it, a Send/Save bar or other needed control
+  stuck under it, the page jumping or the layout collapsing when it opens or closes, or content
+  that can't be scrolled into view above it.
 - Project notes, when given, describe intentional design. Never report what they describe.
 - You are also given automated DOM check hits, measured at named checkpoints (times given).
   Confirm each one you can see (set confirms_check to its id) and silently ignore ones that

@@ -31,7 +31,7 @@ def static_then_moving(tmp_path_factory):
 
 @pytest.fixture
 def run_dir(tmp_path, static_then_moving):
-    d = tmp_path / "home-nav" / "mobile"
+    d = tmp_path / "home-nav" / "iphone-13-pro"
     d.mkdir(parents=True)
     shutil.copy(static_then_moving, d / "video.webm")
     return tmp_path
@@ -40,12 +40,12 @@ def run_dir(tmp_path, static_then_moving):
 @pytest.fixture
 def entry():
     return {
-        "flow": "home-nav", "description": "Home -> nav", "viewport": "mobile", "width": 375, "height": 667,
-        "video": "home-nav/mobile/video.webm",
-        "frames": [{"label": "start", "t": 0.4, "path": "home-nav/mobile/frames/01-start.png"},
-                   {"label": "end", "t": 1.9, "path": "home-nav/mobile/frames/02-end.png"}],
+        "flow": "home-nav", "description": "Home -> nav", "viewport": "iphone-13-pro", "width": 390, "height": 844,
+        "video": "home-nav/iphone-13-pro/video.webm",
+        "frames": [{"label": "start", "t": 0.4, "path": "home-nav/iphone-13-pro/frames/01-start.png"},
+                   {"label": "end", "t": 1.9, "path": "home-nav/iphone-13-pro/frames/02-end.png"}],
         "checks": [{"check": "horizontal-overflow", "frame": "start", "frames": ["start", "end"],
-                    "selector": None, "detail": "503 > 375"}],
+                    "selector": None, "detail": "503 > 390"}],
         "error": None,
     }
 
@@ -120,7 +120,7 @@ def test_messages_send_every_frame_in_order_with_time_captions(entry, tmp_path):
     images = [p for p in content if p["type"] == "image_url"]
     assert len(images) == 3 and not any(p["type"] == "video_url" for p in content)
     intro = content[0]["text"]
-    assert "375x667" in intro and "3 frames follow" in intro and "start @ 0.4s" in intro
+    assert "390x844" in intro and "3 frames follow" in intro and "start @ 0.4s" in intro
     assert '"id": "c0"' in intro and '"seen_at": ["start", "end"]' in intro
 
 
@@ -207,7 +207,7 @@ def test_judge_entry_sends_one_request_with_the_deduped_frames(entry, run_dir, m
     assert out["tokens"] == {"prompt": 9000, "completion": 300, "cached": 4000} and out["cost_usd"] == 0.0012
     assert out["fps"] == 10 and out["coverage"]["frames"] == 11 and out["coverage"]["reviewed"] == 1
     assert out["thinned_from"] is None
-    assert out["film"][0] == {"label": "t=0.00s", "t": 0.0, "path": "home-nav/mobile/film/000000.png"}
+    assert out["film"][0] == {"label": "t=0.00s", "t": 0.0, "path": "home-nav/iphone-13-pro/film/000000.png"}
     assert (run_dir / out["film"][-1]["path"]).exists()
 
 
@@ -215,7 +215,7 @@ def test_judge_entry_sends_one_request_with_the_deduped_frames(entry, run_dir, m
 def test_judge_entry_honours_film_dir(entry, run_dir, monkeypatch, tmp_path):
     monkeypatch.setattr(judge, "call_openrouter", lambda req, key, timeout=180: _body(json.dumps(GOOD)))
     out = judge.judge_entry(entry, run_dir, model="m/x", api_key="k", fps=5, film_dir=run_dir / "elsewhere")
-    assert out["film"][0]["path"].startswith("elsewhere/") and not (run_dir / "home-nav/mobile/film").exists()
+    assert out["film"][0]["path"].startswith("elsewhere/") and not (run_dir / "home-nav/iphone-13-pro/film").exists()
 
 
 @needs_ffmpeg
@@ -301,6 +301,7 @@ def test_extract_frames_reports_empty_extraction(monkeypatch, tmp_path):
 def test_judge_entry_contains_bad_max_frames(entry, tmp_path):
     out = judge.judge_entry(entry, tmp_path, model="m/x", api_key="k", max_frames=1)
     assert "max_frames" in out["error"] and out["findings"] == []
+
 
 
 def test_notes_file_is_sent_as_intentional_design(entry, tmp_path):

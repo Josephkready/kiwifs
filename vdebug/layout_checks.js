@@ -12,6 +12,7 @@
   const perCheck = {};
   const vw = document.documentElement.clientWidth;
   const vh = window.innerHeight;
+  const touch = vw < 768 || (window.matchMedia && matchMedia("(pointer: coarse)").matches);
   const add = (check, el, detail) => {
     if (issues.length >= MAX || (perCheck[check] = (perCheck[check] || 0) + 1) > PER_CHECK) return;
     const r = el ? el.getBoundingClientRect() : null;
@@ -34,8 +35,18 @@
     }
     return parts.join(" > ");
   }
+  // Effective opacity through the ancestor chain (memoised): a control inside a faded-out
+  // container is invisible even though its own opacity is 1.
+  const alphaMemo = new Map();
+  const alphaOf = (el) => {
+    if (!el || el.nodeType !== 1) return 1;
+    if (alphaMemo.has(el)) return alphaMemo.get(el);
+    const a = parseFloat(getComputedStyle(el).opacity) * alphaOf(el.parentElement);
+    alphaMemo.set(el, a);
+    return a;
+  };
   const visible = (el, cs) => {
-    if (cs.display === "none" || cs.visibility === "hidden" || parseFloat(cs.opacity) === 0) return false;
+    if (cs.display === "none" || cs.visibility === "hidden" || alphaOf(el) <= 0.05) return false;
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   };
@@ -128,13 +139,38 @@
           hit[1] = Math.max(hit[1], parseFloat(ps.height) || 0);
         }
       }
-      if (vw < 768 && (hit[0] < 24 || hit[1] < 24) && r.top < vh * 3 && !(el.tagName === "A" && cs.display === "inline")) {
-        add("small-tap-target", el, `${Math.round(r.width)}x${Math.round(r.height)}px < 24x24`);
+      // Touch screens, not a width guess: the iPad Pro 11" (834px) is a touch viewport too.
+      if (touch && (hit[0] < 24 || hit[1] < 24) && r.top < vh * 3 && !(el.tagName === "A" && cs.display === "inline")) {
+        const painted = `${Math.round(r.width)}x${Math.round(r.height)}`;
+        const eff = `${Math.round(hit[0])}x${Math.round(hit[1])}`;
+        add("small-tap-target", el, eff === painted ? `${painted}px < 24x24`
+          : `${eff}px effective hit area (${painted}px painted + ::before/::after) < 24x24`);
       }
     }
   }
 
-  // 5. Interactive elements overlapping each other (one covers the other's hit area).
+  // 5. Invisible but still tappable: a control faded to (near) opacity 0 — by itself or via an
+  // ancestor — that still takes pointer events and is the topmost element at its centre. The
+  // classic "dismissed toast/undo bar whose button keeps eating taps" (found twice in the
+  // rollout, both major). The main loop skips invisible elements, so this is its own pass.
+  const INTERACTIVE = "a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link]";
+  for (const el of document.querySelectorAll(INTERACTIVE)) {
+    if (issues.length >= MAX) break;
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.visibility === "hidden" || cs.pointerEvents === "none") continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 1 || r.height <= 1) continue;  // 1x1 visually-hidden (skip-link) pattern
+    const alpha = alphaOf(el);
+    if (alpha > 0.05) continue;
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    if (cx < 0 || cy < 0 || cx >= vw || cy >= vh) continue;
+    const top = document.elementFromPoint(cx, cy);
+    if (top && (el === top || el.contains(top))) {
+      add("invisible-hit-target", el, `opacity ${alpha.toFixed(2)} but still receives taps at ${Math.round(cx)},${Math.round(cy)}`);
+    }
+  }
+
+  // 6. Interactive elements overlapping each other (one covers the other's hit area).
   for (let i = 0; i < interactive.length && issues.length < MAX; i++) {
     for (let j = i + 1; j < interactive.length; j++) {
       const a = interactive[i], b = interactive[j];
@@ -150,6 +186,50 @@
         if (top && !a.el.contains(top) && !b.el.contains(top) && !top.contains(a.el) && !top.contains(b.el)) continue;
         add("overlapping-controls", a.el, `overlaps ${sel(b.el)} by ${Math.round(ix)}x${Math.round(iy)}px`);
         break;
+      }
+    }
+  }
+  // 7. Touch devices: iOS Safari zooms the whole page when a field whose text is < 16px gets
+  //    focus (and doesn't zoom back). Deterministic cause, so check it at every mark.
+  if (navigator.maxTouchPoints > 0) {
+    for (const el of document.querySelectorAll(
+        "input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=range])" +
+        ":not([type=button]):not([type=submit]):not([type=color]):not([type=file]),textarea,select")) {
+      if (el.closest('[inert],[aria-hidden="true"]')) continue;
+      const cs = getComputedStyle(el);
+      if (!visible(el, cs) || el.disabled) continue;
+      const px = parseFloat(cs.fontSize);
+      if (px < 16) add("ios-input-zoom", el, `font-size ${px}px < 16px: iOS zooms the page when this field is focused`);
+    }
+  }
+
+  // 8. On-screen keyboard (simulated by keyboard.js on touch viewports) is open: what does it hide?
+  const kb = window.__vdKeyboard;
+  if (kb && kb.open) {
+    const kbTop = window.innerHeight - kb.height;
+    const f = document.activeElement;
+    if (f && f !== document.body) {
+      const fr = f.getBoundingClientRect();
+      if (fr.height > 0 && fr.bottom > kbTop + 1) {
+        add("keyboard-covers-focus", f, `field being typed in ends at ${Math.round(fr.bottom)}px, keyboard starts at ${Math.round(kbTop)}px`);
+      }
+    }
+    // Page content under the keyboard can be scrolled up; fixed/sticky controls can't.
+    const pinned = (el) => {
+      for (let p = el; p && p !== document.documentElement; p = p.parentElement) {
+        const pos = getComputedStyle(p).position;
+        if (pos === "fixed" || pos === "sticky") return true;
+      }
+      return false;
+    };
+    for (const el of document.querySelectorAll("a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link]")) {
+      if (el === f || el.closest("#__vd_keyboard") || el.closest('[inert],[aria-hidden="true"]')) continue;
+      const cs = getComputedStyle(el);
+      if (!visible(el, cs) || !pinned(el)) continue;
+      const r = el.getBoundingClientRect();
+      const hidden = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, kbTop);
+      if (hidden > r.height / 2) {
+        add("keyboard-covers-control", el, `pinned control: ${Math.round(hidden)} of ${Math.round(r.height)}px behind the open keyboard`);
       }
     }
   }
