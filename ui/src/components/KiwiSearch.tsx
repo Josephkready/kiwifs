@@ -83,20 +83,22 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
   // on-screen keyboard opens) — see viewportKeyboard.ts.
   const isCoarse = useCoarsePointer();
   const viewportHeight = useVisualViewportHeight();
-  const chromeAboveListRef = useRef<HTMLDivElement | null>(null);
+  // A callback ref (state), not useRef: the dialog content mounts in a portal
+  // after `open` flips, so an effect keyed on `open` ran while the ref was
+  // still null and never measured (list cap ignored the chrome above it).
+  const [chromeAboveListEl, setChromeAboveListEl] = useState<HTMLDivElement | null>(null);
   const [chromeAboveListHeight, setChromeAboveListHeight] = useState(0);
 
   useLayoutEffect(() => {
-    if (!open || !isCoarse) return;
-    const el = chromeAboveListRef.current;
-    if (!el) return;
+    const el = chromeAboveListEl;
+    if (!open || !isCoarse || !el) return;
     const measure = () => setChromeAboveListHeight(el.getBoundingClientRect().height);
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [open, isCoarse]);
+  }, [open, isCoarse, chromeAboveListEl]);
 
   const dialogMaxHeight = computeSearchDialogMaxHeight({ viewportHeight, isCoarse });
   const listMaxHeight = computeSearchListMaxHeight({
@@ -175,7 +177,7 @@ export function KiwiSearch({ open, onOpenChange, onSelect, tree, initialQuery }:
       contentClassName="kiwi-search-dialog"
       contentStyle={dialogMaxHeight !== undefined ? { maxHeight: dialogMaxHeight } : undefined}
     >
-      <div ref={chromeAboveListRef}>
+      <div ref={setChromeAboveListEl}>
       <CommandInput
         placeholder="Search…"
         value={query}
