@@ -79,6 +79,52 @@ describe("computeSearchListMaxHeight", () => {
     expect(listBottom).toBeLessThanOrEqual(834);
   });
 
+  it("subtracts chromeBelowList (e.g. a visible footer) from the available space", () => {
+    const withoutFooter = computeSearchListMaxHeight({
+      viewportHeight: 700,
+      chromeAboveList: 96,
+      chromeBelowList: 0,
+      isCoarse: true,
+    });
+    const withFooter = computeSearchListMaxHeight({
+      viewportHeight: 700,
+      chromeAboveList: 96,
+      chromeBelowList: 40,
+      isCoarse: true,
+    });
+    expect(withFooter).toBe(withoutFooter - 40);
+  });
+
+  it("honors a custom topInset, keeping it in sync with the dialog's own inset", () => {
+    const defaultInset = computeSearchListMaxHeight({
+      viewportHeight: 700,
+      chromeAboveList: 96,
+      chromeBelowList: 0,
+      isCoarse: true,
+    });
+    const widerInset = computeSearchListMaxHeight({
+      viewportHeight: 700,
+      chromeAboveList: 96,
+      chromeBelowList: 0,
+      isCoarse: true,
+      topInset: 32,
+    });
+    // Doubling topInset removes topInset*2 extra px (32 more on each of
+    // top/bottom vs. the default 16) from the dialog's own height budget.
+    expect(widerInset).toBe(defaultInset - (32 - 16) * 2);
+  });
+
+  it("returns the custom desktopMaxHeight override unchanged on non-touch devices", () => {
+    const h = computeSearchListMaxHeight({
+      viewportHeight: 1000,
+      chromeAboveList: 999, // ignored entirely on desktop
+      chromeBelowList: 999,
+      isCoarse: false,
+      desktopMaxHeight: 250,
+    });
+    expect(h).toBe(250);
+  });
+
   it("never collapses the list below the floor even with huge chrome", () => {
     const h = computeSearchListMaxHeight({
       viewportHeight: 300,
