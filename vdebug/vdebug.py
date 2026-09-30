@@ -6,8 +6,8 @@
                      [--viewports all | iphone-13-pro,ipad-pro-11,2k,4k,half-2k,third-4k | NAME=WxH]
                      [--reset-cmd CMD] [--judge [--model M] [--fps 10]] [--fail-on error|check|major|never]
 
-Each flow is a Python file in flows/ (start from flows/example_home.py; the test fixture keeps
-its own copy in testdata/flows/home_nav.py) that drives a Playwright
+Each flow is a Python file in flows/ (start from flows/start_page.py; the test fixture flow lives in
+testdata/flows/home_nav.py) that drives a Playwright
 page and calls vd.mark("label") at every state worth judging. For every flow × viewport
 vdebug writes, under <out>/<run-id>/<flow>/<viewport>/:
 

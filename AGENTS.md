@@ -123,6 +123,7 @@ python3 vdebug/vdebug.py record --base-url http://127.0.0.1:38417 --viewports al
   text field shrinks `visualViewport` and draws a keyboard panel; `keyboard-covers-focus`, `keyboard-covers-control`
   and `ios-input-zoom` (inputs under 16px) run at each mark. The `search`, `sidebar-filter` and `graph-highlight`
   flows type while it is up; any new text-entry UI needs a flow that clicks the field, types and marks.
+  A flow can opt out with `KEYBOARD = False`.
 - **After changing anything under `ui/`**, re-record the flows that touch those screens before opening a PR.
 - Python tests: `cd vdebug && python3 -m pytest -q` (`-m "not browser"` skips real-browser tests).
 - `vdebug/judge_notes.md` lists intentional design (scrollable overflow regions, the sticky

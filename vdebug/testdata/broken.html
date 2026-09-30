@@ -72,7 +72,7 @@
        an opted-in value must still be withheld under the mask), a dialog whose aria-label is
        content, and a real server-rendered POST form (the submit batch must not be lost). -->
   <div data-vd-mask><button data-vd-unmask data-testid="send-btn">Send</button>
-    <button data-testid="secret-pick" style="width:120px">Anxious</button>
+    <button id="anxious-entry" data-testid="secret-pick" style="width:120px">Anxious</button>
     <select name="mood" data-vd-capture-value aria-label="Mood"><option>calm</option><option>tense</option></select></div>
   <!-- mask-escape probe: a masked region with NO interactive element inside it, wrapped by a button -->
   <button class="wrap-btn" style="display:block"><span data-vd-mask><span class="secret-text">Private diagnosis</span></span></button>

@@ -337,6 +337,7 @@ def test_recorder_mask_withholds_names_positions_and_opted_in_values(app):
     assert "Private diagnosis" not in dump                    # never climbed out of the mask
     pick = next(e for e in events if e["type"] == "click" and (e["target"] or {}).get("testid") == "secret-pick")
     assert pick["data"] is None                                  # no x/y inside the mask
+    assert "id" not in pick["target"] and "anxious-entry" not in dump  # kiwifs: masked ids are content (anchors)
     mood = next(e for e in events if e["type"] == "change")
     assert "value" not in (mood["data"] or {})                  # opted in, but masked
     dlg = next(e for e in events if e["type"] == "click" and (e["target"] or {}).get("tag") == "p")
