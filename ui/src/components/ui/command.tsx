@@ -23,6 +23,10 @@ Command.displayName = CommandPrimitive.displayName;
 interface CommandDialogProps extends React.ComponentProps<typeof Dialog> {
   className?: string;
   contentClassName?: string;
+  /** Inline style forwarded to the dialog's DialogContent — used to cap
+   * its height to the visual viewport on touch devices with the keyboard
+   * up (see KiwiSearch's use of `computeSearchDialogMaxHeight`). */
+  contentStyle?: React.CSSProperties;
   commandProps?: React.ComponentPropsWithoutRef<typeof Command>;
 }
 
@@ -30,12 +34,14 @@ const CommandDialog = ({
   children,
   className,
   contentClassName,
+  contentStyle,
   commandProps,
   ...props
 }: CommandDialogProps) => (
   <Dialog {...props}>
     <DialogContent
       className={cn("overflow-hidden p-0 sm:max-w-2xl", contentClassName)}
+      style={contentStyle}
       showCloseButton={false}
     >
       <DialogTitle className="sr-only">Search</DialogTitle>
