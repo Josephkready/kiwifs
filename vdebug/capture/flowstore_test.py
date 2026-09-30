@@ -225,3 +225,116 @@ def test_store_wide_ceiling_refuses_new_sessions(store, monkeypatch):
     assert store.ingest(batch([ev(0, "nav")], sid="cccccccc00000000")) == 0
     assert store.last_ingest["capped"] is True
     assert store.ingest(batch([ev(1, "click")])) == 1       # the existing session still records
+
+
+def test_store_wide_event_ceiling_is_shared_across_sessions(store, monkeypatch):
+    import flowstore
+    monkeypatch.setattr(flowstore, "MAX_EVENTS", 4)
+    assert store.ingest(batch([ev(i, "click") for i in range(3)])) == 3                       # session A
+    assert store.ingest(batch([ev(i, "click") for i in range(3)], sid="bbbbbbbb00000000")) == 1  # B gets the room left
+    assert store.last_ingest["capped"] is True
+    assert store.ingest(batch([ev(0, "click")], sid="cccccccc00000000")) == 0                  # full: no new sessions
+
+
+def test_event_count_is_cached_not_rescanned_per_ingest(store, monkeypatch):
+    import flowstore
+    store.ingest(batch([ev(0, "nav")]))
+    scans = []
+    real = store.db
+    class Spy:
+        def __getattr__(self, name):
+            return getattr(real, name)
+        def execute(self, sql, *a):
+            if "COUNT(*) FROM events" in sql:
+                scans.append(sql)
+            return real.execute(sql, *a)
+        def __enter__(self):
+            return real.__enter__()
+        def __exit__(self, *exc):
+            return real.__exit__(*exc)
+    monkeypatch.setattr(store, "db", Spy())
+    for i in range(1, 6):
+        store.ingest(batch([ev(i, "click")]))
+    assert scans == []                                   # served from the per-process cache
+    assert flowstore._event_count[store.path][0] == 6
+
+
+def test_store_wide_event_ceiling_applies_to_existing_sessions(store, monkeypatch):
+    import flowstore
+    monkeypatch.setattr(flowstore, "MAX_EVENTS", 3)
+    assert store.ingest(batch([ev(0, "nav"), ev(1, "click")])) == 2
+    assert store.ingest(batch([ev(2, "click"), ev(3, "click"), ev(4, "click")])) == 1   # same session
+    assert store.last_ingest["capped"] is True
+
+
+def test_concurrent_first_batches_of_one_session_do_not_race(tmp_path):
+    """Recorder flushes on a timer AND on pagehide: two first batches of one session can hit
+    two connections at once. Both must be stored, neither may raise IntegrityError."""
+    import threading
+    db = tmp_path / "race.db"
+    FlowStore(db).close()
+    errors, barrier = [], threading.Barrier(8)
+
+    def worker(i):
+        s = FlowStore(db)
+        try:
+            barrier.wait()
+            s.ingest(batch([ev(i, "click")], sid="racerace00000000"))
+        except Exception as e:  # noqa: BLE001 — the point is that nothing escapes
+            errors.append(repr(e))
+        finally:
+            s.close()
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    s = FlowStore(db)
+    try:
+        assert errors == []
+        assert len(s.session_events("racerace00000000")) == 8
+    finally:
+        s.close()
+
+
+def test_lazy_prune_exposes_how_many_sessions_it_removed(tmp_path):
+    db = tmp_path / "flows.db"
+    s = FlowStore(db)
+    s.ingest(batch([ev(0, "nav")]))
+    s.db.execute("UPDATE sessions SET last_seen_at = '2000-01-01T00:00:00+00:00'")
+    s.db.commit()
+    s.close()
+    s = FlowStore(db, prune_days=30)
+    assert s.last_prune_count == 1
+    s.close()
+    assert FlowStore(db).last_prune_count is None       # no prune requested
+
+
+def test_event_count_cache_is_not_bumped_by_a_rolled_back_ingest(store, monkeypatch):
+    import sqlite3
+
+    import flowstore
+    store.ingest(batch([ev(0, "nav")]))
+    before = flowstore._event_count[store.path][0]
+    real = store.db
+
+    class FailingUpdate:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def __enter__(self):
+            return real.__enter__()
+
+        def __exit__(self, *exc):
+            return real.__exit__(*exc)
+
+        def execute(self, sql, *a):
+            if sql.startswith("UPDATE sessions"):
+                raise sqlite3.OperationalError("disk I/O error")
+            return real.execute(sql, *a)
+    monkeypatch.setattr(store, "db", FailingUpdate())
+    with pytest.raises(sqlite3.OperationalError):
+        store.ingest(batch([ev(1, "click"), ev(2, "click")]))
+    assert flowstore._event_count[store.path][0] == before          # rolled back: cache untouched
+    monkeypatch.undo()
+    assert store.stats()["events"] == 1                                # and nothing was stored

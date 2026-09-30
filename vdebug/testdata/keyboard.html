@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- Fixture for the simulated on-screen keyboard (keyboard.js) and its checks.
+     PLANTED bugs:
+     - #msg / #send live in a position:fixed bottom bar that ignores the keyboard, so on a phone
+       both end up behind it (keyboard-covers-focus + keyboard-covers-control). With ?aware=1 the
+       bar follows window.visualViewport like a correctly built app, and nothing is covered.
+     - #note has a 13px font: iOS zooms the page when it's focused (ios-input-zoom).
+     NOT bugs: #agree / #plan-a (a checkbox and a radio never open a keyboard), #name (16px) and #late, a field far down the page that the keyboard scrolls into
+     view (like a phone does), so it stays visible above the keyboard. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keyboard fixture</title>
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  main { padding: 12px 12px 90px; }
+  label { display: block; margin: 12px 0; }
+  input { font-size: 16px; }
+  #note { font-size: 13px; }
+  .spacer { height: 1400px; background: linear-gradient(#fff, #eef); }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; height: 56px; display: flex; gap: 8px; align-items: center;
+         padding: 0 8px; background: #234; }
+  #bar input { flex: 1; }
+</style></head>
+<body>
+<main>
+  <label>Name <input id="name"></label>
+  <label>Note <input id="note"></label>
+  <label><input type="checkbox" id="agree"> Agree</label>
+  <label><input type="radio" name="plan" id="plan-a"> Plan A</label>
+  <div class="spacer"></div>
+  <label>Last field <input id="late"></label>
+</main>
+<div id="bar"><input id="msg" aria-label="Message"><button id="send">Send</button></div>
+<script>
+  if (location.search.includes("aware=1") && window.visualViewport) {
+    const bar = document.getElementById("bar");
+    const lift = () => { bar.style.bottom = (window.innerHeight - window.visualViewport.height) + "px"; };
+    window.visualViewport.addEventListener("resize", lift);
+  }
+</script>
+</body></html>

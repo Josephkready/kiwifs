@@ -34,6 +34,8 @@
   .covered .scrim { position: absolute; inset: -4px; background: rgba(0,0,0,.4); z-index: 2; }
   .parked { position: absolute; left: -2000px; top: 0; } .parked button + button { margin-left: -20px; }
   .deco { position: relative; } .deco::after { content: ""; position: absolute; right: -6px; top: 0; bottom: 0; width: 2px; background: #999; }
+  .ghostbar { position: fixed; left: 8px; bottom: 60px; opacity: 0; transition: opacity .2s; }
+  .ghostbar.gone { pointer-events: none; }
   .chips { margin: 12px; } .chip { width: 80px; } .chip + .chip { margin-left: -20px; }
   #menu-btn { display: none; }
   .toast { position: fixed; right: 16px; bottom: 16px; background: #222; color: #fff; padding: 10px 14px;
@@ -70,8 +72,10 @@
        an opted-in value must still be withheld under the mask), a dialog whose aria-label is
        content, and a real server-rendered POST form (the submit batch must not be lost). -->
   <div data-vd-mask><button data-vd-unmask data-testid="send-btn">Send</button>
-    <button data-testid="secret-pick" style="width:120px">Anxious</button>
+    <button id="anxious-entry" data-testid="secret-pick" style="width:120px">Anxious</button>
     <select name="mood" data-vd-capture-value aria-label="Mood"><option>calm</option><option>tense</option></select></div>
+  <!-- mask-escape probe: a masked region with NO interactive element inside it, wrapped by a button -->
+  <button class="wrap-btn" style="display:block"><span data-vd-mask><span class="secret-text">Private diagnosis</span></span></button>
   <div role="dialog" aria-label="Chicken tikka 450 kcal"><p id="dlg-text">Tap for details</p></div>
   <!-- NOT bugs (false-positive regressions): sr-only text, an emoji icon button, a tiny link
        with a 44px ::after hit area, and two overlapping buttons hidden under a scrim/modal. -->
@@ -80,6 +84,10 @@
   <a class="hit-expanded" href="#help" aria-label="Help"></a>
   <div class="parked" inert><button class="park-a">One</button><button class="park-b">Two</button></div>
   <button class="deco">OK</button>
+  <!-- BUG: a dismissed undo bar (opacity 0) whose button still eats taps -> invisible-hit-target.
+       NOT a bug: the same bar with pointer-events:none. -->
+  <div class="ghostbar"><button class="ghost-undo">Undo</button></div>
+  <div class="ghostbar gone" style="bottom: 110px"><button class="ghost-ok">Undo</button></div>
   <div class="covered"><button class="under-a">One</button><button class="under-b">Two</button><div class="scrim"></div></div>
   <form method="post" action="/submitted" id="real-post"><button type="submit">Send it</button></form>
   <!-- Kept apart from the .cta button: right after it, judges read the red square as part

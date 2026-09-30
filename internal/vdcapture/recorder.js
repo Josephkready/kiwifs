@@ -23,6 +23,12 @@
  */
 (function () {
   "use strict";
+  // Never let the recorder break the host page: the whole setup and every callback it
+  // registers (listeners, timers, the history hooks) run inside try/catch.
+  function safe(fn) { return function () { try { return fn.apply(this, arguments); } catch (e) { /* drop */ } }; }
+  function on(t, type, fn, opt) { t.addEventListener(type, safe(fn), opt); }
+  function later(fn, ms) { return setTimeout(safe(fn), ms); }
+  try {
   var script = document.currentScript || {};
   var ds = script.dataset || {};
   var cfg = Object.assign(
@@ -94,6 +100,9 @@
     "[contenteditable=''],[contenteditable=true]";
   function target(el) {
     var act = el.closest ? el.closest(ACTIONABLE) || el : el;
+    // Never climb OUT of a mask: an outer button/link wrapping a masked region would otherwise
+    // be named by its textContent — the masked text itself (datapoint found this).
+    if (masked(el) && !masked(act)) act = el;
     // kiwifs: ids under [data-vd-mask] are content-derived (heading anchors), so drop them too.
     var id = !masked(act) && act.id && !/\d{3,}|^[a-f0-9-]{16,}$/i.test(act.id) ? act.id : null; // skip generated ids
     return {
@@ -128,19 +137,19 @@
   }
   ["pushState", "replaceState"].forEach(function (m) {
     var orig = history[m];
-    history[m] = function () { var r = orig.apply(this, arguments); setTimeout(function () { nav(m); }, 0); return r; };
+    history[m] = function () { var r = orig.apply(this, arguments); later(function () { nav(m); }, 0); return r; };
   });
-  addEventListener("popstate", function () { nav("popstate"); });
-  addEventListener("hashchange", function () { nav("hash"); });
+  on(window, "popstate", function () { nav("popstate"); });
+  on(window, "hashchange", function () { nav("hash"); });
   nav("load");
 
-  document.addEventListener("click", function (e) {
+  on(document, "click", function (e) {
     var t = e.target; if (!t || t.nodeType !== 1) return;
     // No position inside a mask: on a visual picker (wheel, rating row) x/y reveals the choice.
     var pos = masked(t) ? undefined : { x: Math.round(e.clientX / innerWidth * 100), y: Math.round(e.clientY / innerHeight * 100) };
     push("click", { target: target(t), data: pos });
   }, true);
-  document.addEventListener("change", function (e) {
+  on(document, "change", function (e) {
     var el = e.target; if (!el || !el.tagName) return;
     var kind = el.type || el.tagName.toLowerCase();
     if (/^(text|email|password|search|tel|url|number|textarea)$/.test(kind)) {
@@ -152,12 +161,12 @@
   }, true);
   // A server-rendered POST unloads the page right away; flush now or the last batch (the
   // submit itself) is often lost to pagehide.
-  document.addEventListener("submit", function (e) { push("submit", { target: target(e.target) }); flush(true); }, true);
+  on(document, "submit", function (e) { push("submit", { target: target(e.target) }); flush(true); }, true);
 
   var maxDepth = 0, scrollTimer = null;
-  addEventListener("scroll", function () {
+  on(window, "scroll", function () {
     if (scrollTimer) return;
-    scrollTimer = setTimeout(function () {
+    scrollTimer = later(function () {
       scrollTimer = null;
       var h = document.documentElement.scrollHeight - innerHeight;
       var d = h > 0 ? Math.round(scrollY / h * 100) : 100;
@@ -165,10 +174,11 @@
     }, 1000);
   }, { passive: true });
   var resizeTimer = null;
-  addEventListener("resize", function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(function () { push("resize", { data: { w: innerWidth, h: innerHeight } }); }, 500); });
-  addEventListener("error", function (e) { push("error", { data: { message: String(e.message || "error").slice(0, 200), source: String(e.filename || "").split("?")[0].slice(-120) } }); });
+  on(window, "resize", function () { clearTimeout(resizeTimer); resizeTimer = later(function () { push("resize", { data: { w: innerWidth, h: innerHeight } }); }, 500); });
+  on(window, "error", function (e) { push("error", { data: { message: String(e.message || "error").slice(0, 200), source: String(e.filename || "").split("?")[0].slice(-120) } }); });
 
-  setInterval(function () { flush(false); }, cfg.flushMs);
-  addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") flush(true); });
-  addEventListener("pagehide", function () { flush(true); });
+  setInterval(safe(function () { flush(false); }), cfg.flushMs);
+  on(window, "visibilitychange", function () { if (document.visibilityState === "hidden") flush(true); });
+  on(window, "pagehide", function () { flush(true); });
+  } catch (e) { /* a recorder failure must never surface in the app */ }
 })();

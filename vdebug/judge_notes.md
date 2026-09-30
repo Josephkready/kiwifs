@@ -11,3 +11,11 @@
   clickable labels; that is also intentional.
 - Long node labels in the knowledge graph are truncated with an ellipsis and shown in full
   on hover — this is not clipped text.
+- Before "Fit graph" is pressed the force layout can leave a node near an edge with its label
+  partly off-canvas, and labels in dense clusters can touch or overlap. The graph is a
+  canvas drawing that the user pans/zooms/fits, so neither is a DOM layout bug.
+- On iPhone and iPad the grey panel at the bottom is the simulated on-screen keyboard. It
+  opens when a text field (search box, "Filter pages…", graph "Highlight...") is focused and
+  closes on the tap that follows; a single frame where it is still drawn while the next
+  screen is loading is the close lagging the tap by one video frame (measured: it closes
+  within 40 ms of the tap), not a keyboard that stays open.

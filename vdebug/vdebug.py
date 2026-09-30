@@ -2,10 +2,12 @@
 """vdebug — record user flows across a responsive viewport matrix, optionally AI-judge them.
 
     vdebug.py list
-    vdebug.py record --base-url http://localhost:8000 [--flow NAME ...] [--viewports mobile,desktop]
-                     [--judge [--model M] [--fps 10]] [--fail-on error|check|major|never]
+    vdebug.py record --base-url http://localhost:8000 [--flow NAME[,NAME...] ...]
+                     [--viewports all | iphone-13-pro,ipad-pro-11,2k,4k,half-2k,third-4k | NAME=WxH]
+                     [--reset-cmd CMD] [--judge [--model M] [--fps 10]] [--fail-on error|check|major|never]
 
-Each flow is a Python file in flows/ (see flows/example_home.py) that drives a Playwright
+Each flow is a Python file in flows/ (start from flows/start_page.py; the test fixture flow lives in
+testdata/flows/home_nav.py) that drives a Playwright
 page and calls vd.mark("label") at every state worth judging. For every flow × viewport
 vdebug writes, under <out>/<run-id>/<flow>/<viewport>/:
 
@@ -47,6 +49,7 @@ os.environ.setdefault("NODE_OPTIONS", "--no-deprecation")  # silence Playwright 
 
 HERE = pathlib.Path(__file__).resolve().parent
 LAYOUT_CHECKS_JS = (HERE / "layout_checks.js").read_text()
+KEYBOARD_JS = (HERE / "keyboard.js").read_text()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,13 +58,15 @@ class Viewport:
     width: int
     height: int
     mobile: bool = False  # is_mobile + has_touch, so the app takes its touch/mobile branch
+    keyboard: int = 0     # on-screen keyboard height (CSS px) when a text field has focus; 0 = none
 
 
 # The screens the apps are actually used on (CSS px, at deviceScaleFactor 1 — layout is the
 # same as on the real high-DPI device, and 1x keeps recordings and judge cost down).
 VIEWPORTS = {
-    "iphone-13-pro": Viewport("iphone-13-pro", 390, 844, mobile=True),
-    "ipad-pro-11": Viewport("ipad-pro-11", 834, 1194, mobile=True),   # M1, portrait
+    # keyboard: portrait software keyboard incl. the predictive/shortcut bar (approximate).
+    "iphone-13-pro": Viewport("iphone-13-pro", 390, 844, mobile=True, keyboard=336),
+    "ipad-pro-11": Viewport("ipad-pro-11", 834, 1194, mobile=True, keyboard=360),   # M1, portrait
     "2k": Viewport("2k", 2560, 1440),
     "4k": Viewport("4k", 3840, 2160),
     "half-2k": Viewport("half-2k", 1280, 1440),                       # a window on half a 2K screen
@@ -93,7 +98,8 @@ def parse_viewports(spec: str) -> list[Viewport]:
         if not m:
             raise ValueError(f"unknown viewport {part!r} (presets: {', '.join(VIEWPORTS)}, or NAME=WxH)")
         w, h = int(m.group(2)), int(m.group(3))
-        vp = Viewport(m.group(1) or f"{w}x{h}", w, h, mobile=w < 768)
+        touch = w < 768
+        vp = Viewport(m.group(1) or f"{w}x{h}", w, h, mobile=touch, keyboard=round(h * 0.4) if touch else 0)
         if vp not in out:
             out.append(vp)
     return out
@@ -121,14 +127,25 @@ class Flow:
     path: pathlib.Path
     must_fit: bool | list[str] = False
     setup: types.FunctionType | None = None
+    keyboard: bool = True  # flow's KEYBOARD: simulate the on-screen keyboard on touch viewports
 
 
 def load_flows(flows_dir: pathlib.Path) -> list[Flow]:
     flows = []
     # Flows are loaded by path, so put their dir on sys.path: `from _helpers import ...` in a
     # flow must work (flows.md recommends shared helpers in flows/_helpers.py).
-    if str(flows_dir.resolve()) not in sys.path:
-        sys.path.insert(0, str(flows_dir.resolve()))
+    # Always move this dir to the FRONT: if it was already on sys.path behind another flows
+    # dir (a second load_flows call), that dir's `_helpers.py` would still win. (fasttask sync)
+    here = str(flows_dir.resolve())
+    if here in sys.path:
+        sys.path.remove(here)
+    sys.path.insert(0, here)
+    # A `_helpers` imported earlier from ANOTHER flows dir (a second repo, the test fixture)
+    # would shadow this dir's copy: drop cached `_*` modules that don't live here.
+    for helper in flows_dir.glob("_*.py"):
+        cached = sys.modules.get(helper.stem)
+        if cached is not None and pathlib.Path(getattr(cached, "__file__", "") or "").resolve() != helper.resolve():
+            del sys.modules[helper.stem]
     for path in sorted(flows_dir.glob("*.py")):
         if path.name.startswith("_") or path.name.endswith("_test.py"):
             continue
@@ -145,6 +162,7 @@ def load_flows(flows_dir: pathlib.Path) -> list[Flow]:
             viewports=getattr(mod, "VIEWPORTS", None),
             run=mod.run,
             must_fit=getattr(mod, "MUST_FIT", False),
+            keyboard=getattr(mod, "KEYBOARD", True),
             setup=getattr(mod, "setup", None),
             path=path,
         ))
@@ -156,6 +174,8 @@ def load_flows(flows_dir: pathlib.Path) -> list[Flow]:
 
 
 def select_flows(flows: list[Flow], patterns: list[str] | None) -> list[Flow]:
+    """Flows matching any NAME/glob; each --flow may also be a comma list ("a,b,c*")."""
+    patterns = [p.strip() for arg in (patterns or []) for p in arg.split(",") if p.strip()]
     if not patterns:
         return flows
     picked = [f for f in flows if any(fnmatch.fnmatch(f.name, p) for p in patterns)]
@@ -207,7 +227,8 @@ class VD:
 
         show: a Locator to scroll into view first. On small viewports the state you are
         marking (a log row, a toast, a panel below a big widget) is often off-screen — then
-        the screenshot AND the recording miss it.
+        the screenshot AND the recording miss it. A locator that matches nothing raises (like
+        any Playwright action in the flow): that is a flow bug, reported as the flow's error.
         """
         if show is not None:
             show.scroll_into_view_if_needed()
@@ -229,8 +250,9 @@ class VD:
                 if sh > ih + 1:
                     hits.append({"check": "below-fold", "selector": None, "rect": None,
                                  "detail": f"page is {sh}px tall in a {ih}px viewport; {sh - ih}px needs scrolling"})
-            except Exception:
-                pass
+            except Exception as e:  # never silently skip a guard the flow asked for
+                hits.append({"check": "checks-failed", "selector": None, "rect": None,
+                             "detail": f"MUST_FIT below-fold check could not run: {str(e)[:160]}"})
         # A static defect hits at every mark; report it once, listing where it was seen.
         for h in hits:
             prior = self._seen.get((h["check"], h.get("selector")))
@@ -258,6 +280,8 @@ def record_one(browser, flow: Flow, vp: Viewport, base_url: str, run_dir: pathli
         reduced_motion="no-preference",
     )
     ctx.set_default_timeout(step_timeout_ms)
+    if vp.keyboard and flow.keyboard:  # focusing a text field shows a keyboard, as on the phone
+        ctx.add_init_script(KEYBOARD_JS.replace("__VD_KB_HEIGHT__", str(vp.keyboard)))
     page = ctx.new_page()
     fit = flow.must_fit is True or (isinstance(flow.must_fit, (list, tuple))
                                     and canonical(vp.name) in {canonical(v) for v in flow.must_fit})
@@ -300,6 +324,7 @@ def record_one(browser, flow: Flow, vp: Viewport, base_url: str, run_dir: pathli
     return {
         "flow": flow.name, "description": flow.description, "source": flow.source,
         "viewport": vp.name, "width": vp.width, "height": vp.height,
+        "keyboard": bool(vp.keyboard and flow.keyboard),
         "video": video_rel, "duration_s": round(time.monotonic() - started, 2),
         "frames": vd.frames, "checks": vd.checks, "console_errors": console_errors[:20],
         "error": error,
@@ -333,7 +358,8 @@ def record(flows: list[Flow], viewports: list[Viewport], base_url: str, out_root
                 for vp in viewports:
                     if flow.viewports and canonical(vp.name) not in {canonical(v) for v in flow.viewports}:
                         continue
-                    log(f"recording {flow.name} @ {vp.name} ({vp.width}x{vp.height})")
+                    log(f"recording {flow.name} @ {vp.name} ({vp.width}x{vp.height})"
+                        + (" +keyboard" if vp.keyboard and flow.keyboard else ""))
                     # Every recording starts from the same app state: one server serves all
                     # viewports, and a flow that saves data changes what the next one sees.
                     reset_error = run_reset(reset_cmd, log) if reset_cmd else None
@@ -341,7 +367,8 @@ def record(flows: list[Flow], viewports: list[Viewport], base_url: str, out_root
                     entry["reset_error"] = reset_error
                     if reset_error:  # state is unknown, so the recording can't be trusted: fail it
                         log(f"  {reset_error}")
-                        entry["error"] = entry["error"] or f"state reset failed before this recording: {reset_error}"
+                        entry["error"] = entry["error"] or (
+                            f"recorded from UNKNOWN app state — the reset before it failed: {reset_error}")
                     report["runs"].append(entry)
                     log(f"  {len(entry['frames'])} frame(s), {len(entry['checks'])} check hit(s), {entry['duration_s']}s")
         finally:
@@ -432,7 +459,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", help="list flows and viewport presets")
     r = sub.add_parser("record", help="record flows (and judge with --judge)")
     r.add_argument("--base-url", default=os.environ.get("VDEBUG_BASE_URL"), help="app under test (or VDEBUG_BASE_URL)")
-    r.add_argument("--flow", action="append", help="flow NAME or glob; repeatable (default: all)")
+    r.add_argument("--flow", action="append", help="flow NAME/glob or a comma list of them; repeatable (default: all)")
     r.add_argument("--viewports", default="all", help="all | comma list of presets or NAME=WxH (e.g. all,kiosk=2560x1600)")
     r.add_argument("--reset-cmd", help="shell command run before EVERY flow x viewport to restore app state "
                                        "(e.g. reseed the fixture db); a failure marks that recording as errored")
