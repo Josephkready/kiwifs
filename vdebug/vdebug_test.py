@@ -742,7 +742,10 @@ def _phone_probe(app, query, before=None, after=None, keyboard=True):
 
 def _focus(page, sel):
     page.evaluate("s => document.querySelector(s).focus({preventScroll: true})", sel)
-    page.wait_for_timeout(150)  # keyboard.js scrolls in a requestAnimationFrame
+    # keyboard.js scrolls in a requestAnimationFrame. A fixed sleep races it: the first page of a
+    # fresh browser often hasn't produced a frame 150ms in, so wait for two real frames instead.
+    page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
+    page.wait_for_timeout(50)
 
 
 @pytest.mark.browser  # real Chromium
