@@ -10,7 +10,7 @@ import { api, type Comment, type CommentAnchor } from "@kw/lib/api";
 import {
   anchorFromSelection,
   hitTest,
-  rangeForAnchor,
+  rangesForAnchors,
 } from "@kw/lib/highlights";
 import { Button } from "@kw/components/ui/button";
 import { Card } from "@kw/components/ui/card";
@@ -99,10 +99,11 @@ export function KiwiComments({ path, containerRef, renderKey, refreshKey }: Prop
     const registry = typeof CSS !== "undefined" ? CSS.highlights : undefined;
     const apply = () => {
       const entries: { id: string; range: Range }[] = [];
-      for (const c of comments) {
-        const range = rangeForAnchor(root, c.anchor);
+      const ranges = rangesForAnchors(root, comments.map((c) => c.anchor));
+      comments.forEach((c, i) => {
+        const range = ranges[i];
         if (range) entries.push({ id: c.id, range });
-      }
+      });
       rangesRef.current = entries;
       if (registry && typeof Highlight !== "undefined") {
         registry.set(HIGHLIGHT_NAME, new Highlight(...entries.map((e) => e.range)));
@@ -111,6 +112,8 @@ export function KiwiComments({ path, containerRef, renderKey, refreshKey }: Prop
     apply();
     let frame = 0;
     const observer = new MutationObserver(() => {
+      // Drop ranges from before this mutation so click/hover never use them.
+      rangesRef.current = [];
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(apply);
     });
@@ -141,14 +144,30 @@ export function KiwiComments({ path, containerRef, renderKey, refreshKey }: Prop
       const r = hit.rect;
       openView(hit.entry.id, new DOMRect(r.left, r.top, r.right - r.left, r.bottom - r.top));
     };
+    let hoverFrame = 0;
+    let pending: MouseEvent | null = null;
+    let hovering = false;
     const onMove = (e: MouseEvent) => {
-      root.classList.toggle("kiwi-comment-hover", hitAt(e.clientX, e.clientY) !== null);
+      pending = e;
+      if (hoverFrame) return;
+      hoverFrame = requestAnimationFrame(() => {
+        hoverFrame = 0;
+        const ev = pending;
+        pending = null;
+        if (!ev) return;
+        const hit = hitAt(ev.clientX, ev.clientY) !== null;
+        if (hit !== hovering) {
+          hovering = hit;
+          root.classList.toggle("kiwi-comment-hover", hit);
+        }
+      });
     };
     root.addEventListener("click", onClick);
     root.addEventListener("mousemove", onMove);
     return () => {
       root.removeEventListener("click", onClick);
       root.removeEventListener("mousemove", onMove);
+      cancelAnimationFrame(hoverFrame);
       root.classList.remove("kiwi-comment-hover");
     };
   }, [containerRef, openView]);
@@ -375,14 +394,11 @@ export function KiwiComments({ path, containerRef, renderKey, refreshKey }: Prop
       <CommentsList
         comments={comments}
         onFocus={(c) => {
-          const root = containerRef.current as HTMLElement | null;
-          if (!root) return;
-          const span = root.querySelector<HTMLElement>(
-            `span[data-comment-id="${c.id}"]`,
-          );
-          if (span) {
-            span.scrollIntoView({ behavior: "smooth", block: "center" });
-            openView(c.id, span.getBoundingClientRect());
+          const entry = rangesRef.current.find((e) => e.id === c.id);
+          if (entry) {
+            entry.range.startContainer.parentElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+            const r = entry.range.getBoundingClientRect();
+            openView(c.id, new DOMRect(r.left, r.top, r.width, r.height));
           }
         }}
         onDelete={remove}

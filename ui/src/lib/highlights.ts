@@ -71,22 +71,28 @@ function positionFor(
 // 'insertBefore' on 'Node'" (the error boundary then hid the whole page).
 // Callers paint the range with the CSS Custom Highlight API instead.
 export function rangeForAnchor(root: HTMLElement, anchor: CommentAnchor): Range | null {
+  return rangesForAnchors(root, [anchor])[0];
+}
+
+// Resolve many anchors against one text snapshot of `root`, so the TreeWalker
+// runs once instead of once per anchor. Read-only: never touches the DOM.
+export function rangesForAnchors(root: HTMLElement, anchors: CommentAnchor[]): (Range | null)[] {
   const { text, nodes, offsets } = collectText(root);
-  const loc = locateAnchor(text, anchor);
-  if (!loc) return null;
-
-  const start = positionFor(loc.index, nodes, offsets);
-  const end = positionFor(loc.index + loc.length, nodes, offsets);
-  if (!start || !end) return null;
-
-  const range = document.createRange();
-  try {
-    range.setStart(start.node, start.local);
-    range.setEnd(end.node, end.local);
-  } catch {
-    return null;
-  }
-  return range;
+  return anchors.map((anchor) => {
+    const loc = locateAnchor(text, anchor);
+    if (!loc) return null;
+    const start = positionFor(loc.index, nodes, offsets);
+    const end = positionFor(loc.index + loc.length, nodes, offsets);
+    if (!start || !end) return null;
+    const range = document.createRange();
+    try {
+      range.setStart(start.node, start.local);
+      range.setEnd(end.node, end.local);
+    } catch {
+      return null;
+    }
+    return range;
+  });
 }
 
 type RectLike = { left: number; right: number; top: number; bottom: number };

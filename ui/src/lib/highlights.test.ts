@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { hitTest, locateAnchor } from "./highlights";
+import { hitTest, locateAnchor, rangeForAnchor } from "./highlights";
 
 describe("locateAnchor", () => {
   it("uses prefix/suffix to pick the right repeat of a quote", () => {
@@ -35,5 +36,35 @@ describe("hitTest", () => {
 
   it("returns null for a point outside every highlight", () => {
     expect(hitTest(entries, 40, 5)).toBeNull();
+  });
+});
+
+describe("rangeForAnchor", () => {
+  it("resolves a quote that spans an element boundary", () => {
+    const root = document.createElement("div");
+    root.innerHTML = "<p>foo <em>bar</em> baz</p>";
+    const range = rangeForAnchor(root, { quote: "o bar b" });
+    expect(range?.toString()).toBe("o bar b");
+  });
+
+  it("leaves the DOM untouched (regression guard for the insertBefore crash)", () => {
+    const root = document.createElement("div");
+    root.innerHTML = "<p>foo <em>bar</em> baz</p>";
+    const before = root.innerHTML;
+    const childCount = root.childNodes.length;
+    rangeForAnchor(root, { quote: "o bar b" });
+    expect(root.innerHTML).toBe(before);
+    expect(root.childNodes.length).toBe(childCount);
+  });
+
+  it("returns null when the quote is missing", () => {
+    const root = document.createElement("div");
+    root.innerHTML = "<p>foo <em>bar</em> baz</p>";
+    expect(rangeForAnchor(root, { quote: "xyz" })).toBeNull();
+  });
+
+  it("returns null, without throwing, for an empty root", () => {
+    const root = document.createElement("div");
+    expect(rangeForAnchor(root, { quote: "x" })).toBeNull();
   });
 });
