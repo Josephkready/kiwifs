@@ -9,8 +9,8 @@ import { CheckCircle, Circle, Plus, Trash2 } from "lucide-react";
 import { api, type Comment, type CommentAnchor } from "@kw/lib/api";
 import {
   anchorFromSelection,
-  clearWraps,
-  wrapAnchor,
+  hitTest,
+  rangesForAnchors,
 } from "@kw/lib/highlights";
 import { Button } from "@kw/components/ui/button";
 import { Card } from "@kw/components/ui/card";
@@ -26,10 +26,13 @@ type Props = {
   path: string;
   containerRef: React.RefObject<HTMLElement | null>;
   // Changes whenever the rendered markdown is replaced so we can re-apply
-  // highlight spans on top of the fresh DOM.
+  // highlight ranges on top of the fresh DOM.
   renderKey: unknown;
   refreshKey?: number;
 };
+
+// Name of the CSS highlight; styled by ::highlight(kiwi-comment) in index.css.
+const HIGHLIGHT_NAME = "kiwi-comment";
 
 type PopoverState =
   | { mode: "closed" }
@@ -81,17 +84,93 @@ export function KiwiComments({ path, containerRef, renderKey, refreshKey }: Prop
     setSelectionBtn(null);
   }, []);
 
-  // Apply highlight spans after every render of the markdown container.
-  // useLayoutEffect so the wraps are in place before the browser paints.
+  // Comment id -> live Range over the prose. Rebuilt whenever the comments
+  // or the rendered markdown change.
+  const rangesRef = useRef<{ id: string; range: Range }[]>([]);
+
+  // Paint comment anchors with the CSS Custom Highlight API. Nothing is
+  // inserted into the prose DOM, so React can re-render it freely (see
+  // rangeForAnchor). A MutationObserver re-resolves the ranges whenever
+  // React replaces nodes for reasons other than renderKey (theme, async
+  // code blocks, wikilink resolution).
   useLayoutEffect(() => {
     const root = containerRef.current as HTMLElement | null;
     if (!root) return;
-    clearWraps(root);
-    comments.forEach((c) => wrapAnchor(root, c.anchor, c.id, openView));
-    return () => {
-      if (root) clearWraps(root);
+    const registry = typeof CSS !== "undefined" ? CSS.highlights : undefined;
+    const apply = () => {
+      const entries: { id: string; range: Range }[] = [];
+      const ranges = rangesForAnchors(root, comments.map((c) => c.anchor));
+      comments.forEach((c, i) => {
+        const range = ranges[i];
+        if (range) entries.push({ id: c.id, range });
+      });
+      rangesRef.current = entries;
+      if (registry && typeof Highlight !== "undefined") {
+        registry.set(HIGHLIGHT_NAME, new Highlight(...entries.map((e) => e.range)));
+      }
     };
-  }, [comments, containerRef, renderKey, openView]);
+    apply();
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      // Drop ranges from before this mutation so click/hover never use them.
+      rangesRef.current = [];
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(apply);
+    });
+    observer.observe(root, { childList: true, characterData: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      rangesRef.current = [];
+      registry?.delete(HIGHLIGHT_NAME);
+    };
+  }, [comments, containerRef, renderKey]);
+
+  // Clicking highlighted text opens that comment; hovering it shows a
+  // pointer. Both hit-test the ranges' client rects.
+  useEffect(() => {
+    const root = containerRef.current as HTMLElement | null;
+    if (!root) return;
+    const hitAt = (x: number, y: number) =>
+      hitTest(
+        rangesRef.current.map((e) => ({ id: e.id, rects: e.range.getClientRects() })),
+        x,
+        y,
+      );
+    const onClick = (e: MouseEvent) => {
+      if (window.getSelection()?.isCollapsed === false) return;
+      const hit = hitAt(e.clientX, e.clientY);
+      if (!hit) return;
+      const r = hit.rect;
+      openView(hit.entry.id, new DOMRect(r.left, r.top, r.right - r.left, r.bottom - r.top));
+    };
+    let hoverFrame = 0;
+    let pending: MouseEvent | null = null;
+    let hovering = false;
+    const onMove = (e: MouseEvent) => {
+      pending = e;
+      if (hoverFrame) return;
+      hoverFrame = requestAnimationFrame(() => {
+        hoverFrame = 0;
+        const ev = pending;
+        pending = null;
+        if (!ev) return;
+        const hit = hitAt(ev.clientX, ev.clientY) !== null;
+        if (hit !== hovering) {
+          hovering = hit;
+          root.classList.toggle("kiwi-comment-hover", hit);
+        }
+      });
+    };
+    root.addEventListener("click", onClick);
+    root.addEventListener("mousemove", onMove);
+    return () => {
+      root.removeEventListener("click", onClick);
+      root.removeEventListener("mousemove", onMove);
+      cancelAnimationFrame(hoverFrame);
+      root.classList.remove("kiwi-comment-hover");
+    };
+  }, [containerRef, openView]);
 
   // Float an "Add comment" button near any non-empty selection inside the
   // prose container.
@@ -315,14 +394,11 @@ export function KiwiComments({ path, containerRef, renderKey, refreshKey }: Prop
       <CommentsList
         comments={comments}
         onFocus={(c) => {
-          const root = containerRef.current as HTMLElement | null;
-          if (!root) return;
-          const span = root.querySelector<HTMLElement>(
-            `span[data-comment-id="${c.id}"]`,
-          );
-          if (span) {
-            span.scrollIntoView({ behavior: "smooth", block: "center" });
-            openView(c.id, span.getBoundingClientRect());
+          const entry = rangesRef.current.find((e) => e.id === c.id);
+          if (entry) {
+            entry.range.startContainer.parentElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+            const r = entry.range.getBoundingClientRect();
+            openView(c.id, new DOMRect(r.left, r.top, r.width, r.height));
           }
         }}
         onDelete={remove}
