@@ -112,6 +112,27 @@ curl -X PUT 'localhost:3333/api/kiwi/file?path=pages/auth.md' \
 
 ---
 
+## Report a bug button
+
+The web UI header has a Bug button (`data-feature="header.bug"`) that saves a report locally (SQLite) with auto-captured context and optional screenshots; a separate loop on the LAN syncs reports to GitHub issues. The feature is off unless a database path is set.
+
+| Env var | Meaning |
+|---|---|
+| `KIWIFS_BUG_REPORTS_DB` | SQLite path for reports. Empty disables the feature. The path must be outside `--root`: a db inside the served root is refused, because it would be public via `/raw`. |
+| `KIWIFS_PUBLIC_URL` | Base URL used to build LAN triage links. Default `https://mind.local.thedante.net`. |
+| `KIWIFS_BUG_INTERNAL_ALLOW` | Comma-separated CIDRs admitted to `/api/_bug/*` in addition to loopback. Invalid entries are ignored with a log line. |
+
+```bash
+KIWIFS_BUG_REPORTS_DB=/var/lib/kiwifs/bug-reports.db kiwifs serve --root ./knowledge
+```
+
+Public routes: `GET /api/bug-report/config`, `POST /api/bug-report`, `GET /api/bug-reports`, `GET /api/bug-reports/:id/status`, `GET /api/bug-reports/:id/images/:n`.
+LAN triage page: `GET /bug-reports/:id`.
+Sync endpoints (loopback, plus any `KIWIFS_BUG_INTERNAL_ALLOW` CIDRs): `GET /api/_bug/pending`, `GET /api/_bug/queued`, `GET /api/_bug/:id`, `POST /api/_bug/:id/sync`.
+`sync_status` values: `pending-sync`, `queued`, `filed`, `retry`, `failed`, `uncertain`.
+
+---
+
 ## Vector embedder options
 
 Semantic search needs an embedder and a vector store. Configure both under `[search.vector]` in `.kiwi/config.toml`:
