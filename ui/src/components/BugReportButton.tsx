@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Bug, ImagePlus, X } from "lucide-react";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
@@ -33,7 +33,17 @@ interface Props {
 
 const TOAST_MS = 3000;
 
-export function BugReportButton({ getContext, path }: Props) {
+export interface BugReportController {
+  available: boolean;
+  open: boolean;
+  /** Opens the dialog; focus returns to `returnTo` when it closes (default: the previously focused element). */
+  openDialog: (returnTo?: { current: HTMLElement | null } | null) => void;
+  captureSelection: () => void;
+  /** The dialog and toast. Render once, outside any menu that may unmount. */
+  node: ReactNode;
+}
+
+export function useBugReport({ getContext, path }: Props): BugReportController {
   const [available, setAvailable] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -56,44 +66,28 @@ export function BugReportButton({ getContext, path }: Props) {
 
   const snapshot = useRef<BugContext>({});
   const selection = useRef("");
-  const captureSelection = () => {
+  const returnFocus = useRef<{ current: HTMLElement | null } | null>(null);
+  const captureSelection = useCallback(() => {
     selection.current = selectionSnippet(window.getSelection());
-  };
-  const openDialog = () => {
-    snapshot.current = { ...getContext(), selected_text: selection.current || selectionSnippet(window.getSelection()) };
+  }, []);
+  const getCtx = useRef(getContext);
+  getCtx.current = getContext;
+  const openDialog = useCallback((returnTo?: { current: HTMLElement | null } | null) => {
+    snapshot.current = { ...getCtx.current(), selected_text: selection.current || selectionSnippet(window.getSelection()) };
     selection.current = "";
+    returnFocus.current = returnTo ?? null;
     setOpen(true);
-  };
+  }, []);
 
-  if (!available) return null;
-
-  return (
+  const node = available ? (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0 sm:h-8 sm:w-8"
-            title="Report a bug"
-            aria-label="Report a bug"
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            data-feature="header.bug"
-            onPointerDown={captureSelection}
-            onClick={openDialog}
-          >
-            <Bug className="h-4 w-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Report a bug</TooltipContent>
-      </Tooltip>
       <BugReportDialog
         open={open}
         onClose={() => setOpen(false)}
         context={snapshot}
         path={path}
         onSaved={flashToast}
+        returnFocus={returnFocus}
       />
       {toast && (
         <div
@@ -104,6 +98,33 @@ export function BugReportButton({ getContext, path }: Props) {
         </div>
       )}
     </>
+  ) : null;
+
+  return { available, open, openDialog, captureSelection, node };
+}
+
+export function BugReportTrigger({ bug }: { bug: BugReportController }) {
+  if (!bug.available) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 sm:h-8 sm:w-8"
+          title="Report a bug"
+          aria-label="Report a bug"
+          aria-haspopup="dialog"
+          aria-expanded={bug.open}
+          data-feature="header.bug"
+          onPointerDown={bug.captureSelection}
+          onClick={() => bug.openDialog()}
+        >
+          <Bug className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">Report a bug</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -113,12 +134,14 @@ export function BugReportDialog({
   context,
   path,
   onSaved,
+  returnFocus,
 }: {
   open: boolean;
   onClose: () => void;
   context: { current: BugContext };
   path: string | null;
   onSaved: () => void;
+  returnFocus?: { current: { current: HTMLElement | null } | null };
 }) {
   const [text, setText] = useState(() => loadDraft());
   const [images, setImages] = useState<StagedImage[]>([]);
@@ -218,6 +241,13 @@ export function BugReportDialog({
         onOpenAutoFocus={(e) => {
           e.preventDefault();
           areaRef.current?.focus();
+        }}
+        onCloseAutoFocus={(e) => {
+          const target = returnFocus?.current?.current;
+          if (target) {
+            e.preventDefault();
+            target.focus();
+          }
         }}
         onPaste={(e) => {
           const files = imagesFromClipboard(e.clipboardData);

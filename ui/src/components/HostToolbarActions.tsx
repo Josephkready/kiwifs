@@ -16,7 +16,7 @@ import {
   type ToolbarStateEvent,
 } from "../lib/hostConfig";
 
-function resolveLucideIcon(name: string): LucideIcon {
+export function resolveLucideIcon(name: string): LucideIcon {
   const icons = LucideIcons as unknown as Record<string, LucideIcon | undefined>;
   return icons[name] ?? LucideIcons.CircleHelp;
 }
@@ -53,6 +53,37 @@ function HostToolbarButton({
       <TooltipContent side="bottom">{action.label}</TooltipContent>
     </Tooltip>
   );
+}
+
+export interface HostToolbarItem {
+  id: string;
+  label: string;
+  Icon: LucideIcon;
+  disabled: boolean;
+  active: boolean;
+  onSelect: () => void;
+}
+
+/** Host toolbar actions as plain data, for surfaces that render them as menu items. */
+export function useHostToolbarItems(): HostToolbarItem[] {
+  const actions = getToolbarActions();
+  const [states, setStates] = useState<Record<string, KiwiToolbarActionState>>({});
+  useEffect(() => {
+    const onState = (event: Event) => {
+      const detail = (event as ToolbarStateEvent).detail;
+      if (detail && typeof detail === "object") setStates(detail);
+    };
+    window.addEventListener(KIWI_TOOLBAR_STATE_EVENT, onState);
+    return () => window.removeEventListener(KIWI_TOOLBAR_STATE_EVENT, onState);
+  }, []);
+  return actions.map((a) => ({
+    id: a.id,
+    label: a.label,
+    Icon: resolveLucideIcon(a.icon),
+    disabled: Boolean(a.disabled || states[a.id]?.disabled),
+    active: Boolean(states[a.id]?.active),
+    onSelect: () => dispatchToolbarAction(a.id),
+  }));
 }
 
 /** Renders host-configured header toolbar icons (same chrome as built-in tools). */

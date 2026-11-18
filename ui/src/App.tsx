@@ -54,8 +54,9 @@ import { api, getCurrentSpace, setCurrentSpace, sseUrl, type TreeEntry } from ".
 import { useTheme } from "./hooks/useTheme";
 import { isMarkdown, isCanvasFile, isExcalidrawFile } from "./lib/paths";
 import { type TreeRevealRequest } from "./lib/treeReveal";
-import { HostToolbarActions } from "./components/HostToolbarActions";
-import { BugReportButton } from "./components/BugReportButton";
+import { HostToolbarActions, useHostToolbarItems } from "./components/HostToolbarActions";
+import { BugReportTrigger, useBugReport } from "./components/BugReportButton";
+import { HeaderOverflowMenu, type OverflowItem } from "./components/HeaderOverflowMenu";
 import type { BugContext } from "./lib/bugReport";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { OptionalContent } from "./components/OptionalContent";
@@ -725,6 +726,46 @@ const handleSpaceSwitch = useCallback(() => {
     };
   };
 
+  const bug = useBugReport({ getContext: getBugContext, path: activePath });
+  const hostItems = useHostToolbarItems();
+  const toggleView = (id: ToolbarBuiltinViewId) => {
+    const wasOpen = {
+      graph: graphOpen,
+      bases: basesOpen,
+      canvas: canvasOpen,
+      whiteboard: whiteboardOpen,
+      timeline: timelineOpen,
+      kanban: kanbanOpen,
+      data: dataOpen,
+    }[id];
+    closeAllViews();
+    const set = {
+      graph: setGraphOpen,
+      bases: setBasesOpen,
+      canvas: setCanvasOpen,
+      whiteboard: setWhiteboardOpen,
+      timeline: setTimelineOpen,
+      kanban: setKanbanOpen,
+      data: setDataOpen,
+    }[id];
+    set(!wasOpen);
+  };
+  const overflowItems: OverflowItem[] = [
+    ...(features.edit
+      ? [{ id: "new-page", label: "New page", Icon: Plus, onSelect: () => { setNewFolder(undefined); setNewOpen(true); } }]
+      : []),
+    ...toolbarViews.map((id) => ({
+      id,
+      label: BUILTIN_TOOLBAR_BUTTONS[id].label,
+      Icon: BUILTIN_TOOLBAR_BUTTONS[id].Icon,
+      onSelect: () => toggleView(id),
+    })),
+    ...hostItems.map((h) => ({ id: `host-${h.id}`, label: h.label, Icon: h.Icon, onSelect: h.onSelect, disabled: h.disabled, active: h.active })),
+    ...(!themeLocked
+      ? [{ id: "theme", label: theme === "dark" ? "Light mode" : "Dark mode", Icon: theme === "dark" ? Sun : Moon, onSelect: toggleTheme }]
+      : []),
+  ];
+
   const atStartPage =
     !activePath &&
     uiConfigLoaded &&
@@ -782,6 +823,10 @@ const handleSpaceSwitch = useCallback(() => {
 
           {/* Right zone: actions */}
           <div className="flex items-center gap-0.5 shrink-0">
+            {isMobile ? (
+              <HeaderOverflowMenu items={overflowItems} bug={bug} />
+            ) : (
+              <>
             {features.edit && (
             <ToolbarButton onClick={() => { setNewFolder(undefined); setNewOpen(true); }} label={`New page (${formatChordDisplay(bindings.new_page)})`}>
               <Plus className="h-4 w-4" />
@@ -831,8 +876,11 @@ const handleSpaceSwitch = useCallback(() => {
                 {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </ToolbarButton>
             )}
-            <BugReportButton path={activePath} getContext={getBugContext} />
+            <BugReportTrigger bug={bug} />
+              </>
+            )}
           </div>
+          {bug.node}
         </header>
 
         {/* ── Body: sidebar + content ── */}
