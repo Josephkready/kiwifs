@@ -55,6 +55,8 @@ import { useTheme } from "./hooks/useTheme";
 import { isMarkdown, isCanvasFile, isExcalidrawFile } from "./lib/paths";
 import { type TreeRevealRequest } from "./lib/treeReveal";
 import { HostToolbarActions } from "./components/HostToolbarActions";
+import { BugReportButton } from "./components/BugReportButton";
+import type { BugContext } from "./lib/bugReport";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { OptionalContent } from "./components/OptionalContent";
 import { schedulePublishedPagesRefresh } from "./lib/publishedPageRefresh";
@@ -699,6 +701,30 @@ const handleSpaceSwitch = useCallback(() => {
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
 
+  const getBugContext = (): BugContext => {
+    const view =
+      graphOpen ? "graph"
+      : basesOpen ? "bases"
+      : canvasOpen ? "canvas"
+      : whiteboardOpen ? "whiteboard"
+      : timelineOpen ? "timeline"
+      : kanbanOpen ? "kanban"
+      : dataOpen ? "data"
+      : historyOpen ? "history"
+      : editing ? "editor"
+      : activePath ? "page"
+      : "home";
+    return {
+      path: activePath ?? undefined,
+      slug: activePath ? activePath.replace(/\.md$/, "") : undefined,
+      route: window.location.pathname + window.location.hash,
+      view,
+      viewport: `${window.innerWidth}x${window.innerHeight}`,
+      theme,
+      search_query: searchOpen ? searchQuery : undefined,
+    };
+  };
+
   const atStartPage =
     !activePath &&
     uiConfigLoaded &&
@@ -805,6 +831,7 @@ const handleSpaceSwitch = useCallback(() => {
                 {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </ToolbarButton>
             )}
+            <BugReportButton path={activePath} getContext={getBugContext} />
           </div>
         </header>
 

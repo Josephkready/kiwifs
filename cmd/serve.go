@@ -16,6 +16,7 @@ import (
 	"github.com/kiwifs/kiwifs/internal/api"
 	"github.com/kiwifs/kiwifs/internal/backup"
 	"github.com/kiwifs/kiwifs/internal/bootstrap"
+	"github.com/kiwifs/kiwifs/internal/bugreport"
 	"github.com/kiwifs/kiwifs/internal/config"
 	"github.com/kiwifs/kiwifs/internal/docexport"
 	"github.com/kiwifs/kiwifs/internal/lockdir"
@@ -158,6 +159,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	capture := vdcapture.FromEnv(root)
 	vdcapture.SetDefault(capture)
 	defer capture.Close()
+	bugs := bugreport.FromEnv(root, Version)
+	bugreport.SetDefault(bugs)
+	defer bugs.Close()
 
 	stack, err := bootstrap.Build("default", root, defaultCfg)
 	if err != nil {

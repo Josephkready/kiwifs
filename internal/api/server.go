@@ -17,6 +17,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/kiwifs/kiwifs/internal/analytics"
+	"github.com/kiwifs/kiwifs/internal/bugreport"
 	"github.com/kiwifs/kiwifs/internal/claims"
 	"github.com/kiwifs/kiwifs/internal/comments"
 	"github.com/kiwifs/kiwifs/internal/config"
@@ -699,6 +700,10 @@ func (s *Server) setupRoutes() {
 	s.echo.GET(vdcapture.RecorderPath, vdcapture.ServeRecorder)
 	s.echo.POST(vdcapture.EventsPath, capture.HandleEvents)
 	webui.SetHeadInjection(capture.ScriptTag())
+
+	// In-app bug reporter (local tier). Public routes are nginx-carved on the
+	// host; /api/_bug/* is loopback-only inside the package.
+	bugreport.Default().Register(s.echo)
 
 	webui.SetBranding(s.cfg.UI.Branding)
 	uiHandler := webui.Handler()
