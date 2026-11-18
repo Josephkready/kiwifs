@@ -139,7 +139,7 @@ func fail(c echo.Context, code int, msg string) error {
 }
 
 func serverError(c echo.Context, id int64, category string) error {
-	log.Printf("bugreport: id=%d category=%s", id, category)
+	log.Printf("bugreport: id=%d category=%s method=%s path=%s", id, category, c.Request().Method, c.Request().URL.Path)
 	return fail(c, http.StatusInternalServerError, "internal error")
 }
 
@@ -151,6 +151,7 @@ func (r *Reporter) internalOnly(next echo.HandlerFunc) echo.HandlerFunc {
 		req := c.Request()
 		for _, h := range []string{"X-Forwarded-For", "X-Real-IP", "Forwarded"} {
 			if req.Header.Get(h) != "" {
+				log.Printf("bugreport: internal route refused method=%s path=%s reason=proxied", req.Method, req.URL.Path)
 				return fail(c, http.StatusForbidden, "forbidden")
 			}
 		}
@@ -160,6 +161,7 @@ func (r *Reporter) internalOnly(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 		ip := net.ParseIP(host)
 		if ip == nil {
+			log.Printf("bugreport: internal route refused method=%s path=%s reason=unparseable_remote", req.Method, req.URL.Path)
 			return fail(c, http.StatusForbidden, "forbidden")
 		}
 		ok := ip.IsLoopback()
@@ -171,6 +173,7 @@ func (r *Reporter) internalOnly(next echo.HandlerFunc) echo.HandlerFunc {
 			}
 		}
 		if !ok {
+			log.Printf("bugreport: internal route refused method=%s path=%s reason=non_loopback", req.Method, req.URL.Path)
 			return fail(c, http.StatusForbidden, "forbidden")
 		}
 		return next(c)

@@ -99,13 +99,17 @@ export async function compressImage(file: Blob, io: ImageIO = browserImageIO): P
     throw new ImageError("This image format isn't supported — try again or choose a JPEG/PNG.");
   }
   const { width, height } = fitWithin(decoded.width, decoded.height);
-  let out = await io.encode(decoded.source, width, height, "image/webp", 0.8);
-  if (!out || out.type !== "image/webp") {
-    out = await io.encode(decoded.source, width, height, "image/jpeg", 0.8);
+  try {
+    let out = await io.encode(decoded.source, width, height, "image/webp", 0.8);
+    if (!out || out.type !== "image/webp") {
+      out = await io.encode(decoded.source, width, height, "image/jpeg", 0.8);
+    }
+    if (!out) throw new ImageError("This image format isn't supported — try again or choose a JPEG/PNG.");
+    if (out.size > MAX_IMAGE_BYTES) throw new ImageError("Image too large even after compression");
+    return out;
+  } finally {
+    (decoded.source as { close?: () => void } | null)?.close?.();
   }
-  if (!out) throw new ImageError("This image format isn't supported — try again or choose a JPEG/PNG.");
-  if (out.size > MAX_IMAGE_BYTES) throw new ImageError("Image too large even after compression");
-  return out;
 }
 
 export interface StageResult {
@@ -252,7 +256,8 @@ export async function fetchRecent(
   try {
     const res = await doFetch(`/api/bug-reports?${q}`);
     if (!res.ok) return [];
-    return (await res.json()) as PreviousReport[];
+    const j = await res.json();
+    return Array.isArray(j) ? (j as PreviousReport[]) : [];
   } catch {
     return [];
   }

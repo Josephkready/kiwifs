@@ -9,6 +9,7 @@ import {
   pollStatus,
   safeIssueUrl,
   stageImages,
+  statusLabel,
   submitReport,
   type ImageIO,
 } from "./bugReport";
@@ -157,5 +158,99 @@ describe("pollStatus", () => {
     expect(f.mock.calls.length).toBeGreaterThan(1);
     expect(f.mock.calls.length).toBeLessThan(10);
     vi.useRealTimers();
+  });
+});
+
+describe("pollStatus outcomes", () => {
+  it("reports each payload in order and stops at a final status", async () => {
+    vi.useFakeTimers();
+    const filed = { sync_status: "filed", issue_url: "https://github.com/Josephkready/kiwifs/issues/12" };
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sync_status: "queued" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(filed), { status: 200 }));
+    const seen: unknown[] = [];
+    pollStatus(1, (s) => seen.push(s), { intervalMs: 10, maxMs: 100000, fetch: f as unknown as typeof fetch, now: () => 0 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(seen).toEqual([{ sync_status: "queued" }, filed]);
+    expect(f).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("stops polling on a failed final status", async () => {
+    vi.useFakeTimers();
+    const f = vi.fn(async () => new Response(JSON.stringify({ sync_status: "failed" }), { status: 200 }));
+    const seen: unknown[] = [];
+    pollStatus(1, (s) => seen.push(s), { intervalMs: 10, maxMs: 100000, fetch: f as unknown as typeof fetch, now: () => 0 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(seen).toEqual([{ sync_status: "failed" }]);
+    expect(f).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("cancel prevents any fetch when called before the first tick", async () => {
+    vi.useFakeTimers();
+    const f = vi.fn(async () => new Response(JSON.stringify({ sync_status: "queued" }), { status: 200 }));
+    const cancel = pollStatus(1, () => {}, { intervalMs: 10, maxMs: 100000, fetch: f as unknown as typeof fetch, now: () => 0 });
+    cancel();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("ignores a response that arrives after cancel", async () => {
+    vi.useFakeTimers();
+    let resolveFetch: (r: Response) => void = () => {};
+    const f = vi.fn(() => new Promise<Response>((r) => { resolveFetch = r; }));
+    const onUpdate = vi.fn();
+    const cancel = pollStatus(1, onUpdate, { intervalMs: 10, maxMs: 100000, fetch: f as unknown as typeof fetch, now: () => 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f).toHaveBeenCalledTimes(1);
+    cancel();
+    resolveFetch(new Response(JSON.stringify({ sync_status: "queued" }), { status: 200 }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(f).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+});
+
+describe("submitReport error and attachment handling", () => {
+  const input = { description: "something broke here", key: "k", context: {}, images: [] };
+  const noopStorage = { setItem: () => {}, removeItem: () => {} };
+  it("returns the server's JSON error string as the message", async () => {
+    const f = vi.fn(async () => new Response(JSON.stringify({ error: "Too large" }), { status: 413 }));
+    const res = await submitReport(input, { fetch: f as unknown as typeof fetch, storage: noopStorage });
+    expect(res).toEqual({ ok: false, message: "Too large" });
+  });
+  it("falls back to the generic message for a non-JSON error body", async () => {
+    const f = vi.fn(async () => new Response("oops", { status: 500 }));
+    const res = await submitReport(input, { fetch: f as unknown as typeof fetch, storage: noopStorage });
+    expect(res).toEqual({ ok: false, message: "Could not save the report. Your draft is kept." });
+  });
+  it("appends a webp screenshot as screenshot-1.webp", async () => {
+    let captured: FormData | undefined;
+    const f = vi.fn(async (_url: string, init?: RequestInit) => {
+      captured = init?.body as FormData;
+      return new Response(JSON.stringify({ id: 1, key: "k" }), { status: 202 });
+    });
+    await submitReport(
+      { ...input, images: [new Blob(["x"], { type: "image/webp" })] },
+      { fetch: f as unknown as typeof fetch, storage: noopStorage },
+    );
+    expect((captured?.get("attachments") as File).name).toBe("screenshot-1.webp");
+  });
+});
+
+describe("statusLabel", () => {
+  it.each([
+    ["pending-sync", "Saved, waiting to sync"],
+    ["queued", "Saved, queued for GitHub"],
+    ["retry", "Saved, GitHub is delayed"],
+    ["filed", "Filed"],
+    ["failed", "Saved, needs attention"],
+    ["uncertain", "Saved, needs attention"],
+  ] as const)("%s maps to its label", (status, label) => {
+    expect(statusLabel(status)).toBe(label);
   });
 });

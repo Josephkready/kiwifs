@@ -86,4 +86,82 @@ describe("BugReportDialog", () => {
     await render(true);
     expect(document.querySelectorAll('img[alt^="Screenshot"]')).toHaveLength(0);
   });
+
+  it("Ctrl+Enter and Cmd+Enter save once with a UUID idempotency key and close", async () => {
+    const fetchMock = routedFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <TooltipProvider>
+          <BugReportDialog open onClose={onClose} context={ctx} path="a.md" onSaved={() => {}} />
+        </TooltipProvider>,
+      );
+    });
+    await setText("long enough description");
+    const dlg = q<HTMLElement>('[data-testid="bug-report-dialog"]')!;
+    await act(async () => {
+      dlg.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+    });
+    expect(sentKeys(fetchMock)).toHaveLength(1);
+    expect(sentKeys(fetchMock)[0]).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root.render(
+        <TooltipProvider>
+          <BugReportDialog open onClose={onClose} context={ctx} path="a.md" onSaved={() => {}} />
+        </TooltipProvider>,
+      );
+    });
+    await setText("long enough description");
+    await act(async () => {
+      dlg.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }));
+    });
+    expect(sentKeys(fetchMock)).toHaveLength(2);
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("Save and add keeps the dialog open, clears the text and rotates the idempotency key", async () => {
+    const fetchMock = routedFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <TooltipProvider>
+          <BugReportDialog open onClose={onClose} context={ctx} path="a.md" onSaved={() => {}} />
+        </TooltipProvider>,
+      );
+    });
+    const addBtn = () => [...document.querySelectorAll("button")].find((b) => b.textContent === "Save and add")!;
+    await setText("long enough description");
+    await act(async () => addBtn().click());
+    expect(q<HTMLTextAreaElement>("textarea")!.value).toBe("");
+    expect(onClose).not.toHaveBeenCalled();
+
+    await setText("second long enough description");
+    await act(async () => addBtn().click());
+    expect(onClose).not.toHaveBeenCalled();
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
 });
+
+let postCount = 0;
+function routedFetch() {
+  postCount = 0;
+  return vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      postCount += 1;
+      return new Response(JSON.stringify({ status: "saved", id: postCount, key: "k" }), { status: 202 });
+    }
+    return new Response("[]");
+  });
+}
+
+function sentKeys(fm: ReturnType<typeof vi.fn>): string[] {
+  return fm.mock.calls
+    .filter(([, i]) => (i as RequestInit | undefined)?.method === "POST")
+    .map(([, i]) => String(((i as RequestInit).body as FormData).get("idempotency_key")));
+}

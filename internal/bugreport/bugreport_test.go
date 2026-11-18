@@ -402,3 +402,23 @@ func TestNoContentInLogs(t *testing.T) {
 		t.Errorf("content leaked into logs: %s", logs.String())
 	}
 }
+
+func TestPendingIncludesRetryOnly(t *testing.T) {
+	e, _ := setup(t)
+	for i := 1; i <= 6; i++ {
+		f := fields("report number " + fmt.Sprint(i))
+		f["idempotency_key"] = fmt.Sprintf("3f2a1c9e-1b2d-4e5f-8a9b-%012d", i)
+		post(e, f, nil)
+	}
+	for i, st := range []string{"pending-sync", "retry", "queued", "filed", "failed", "uncertain"} {
+		body := `{"sync_status":"` + st + `","job_id":"j"}`
+		if rec := loopbackReq(e, "POST", fmt.Sprintf("/api/_bug/%d/sync", i+1), body); rec.Code != 200 {
+			t.Fatalf("%s: %d", st, rec.Code)
+		}
+	}
+	var pending []Pending
+	json.Unmarshal(loopbackReq(e, "GET", "/api/_bug/pending", "").Body.Bytes(), &pending)
+	if len(pending) != 2 || pending[0].ID != 1 || pending[1].ID != 2 {
+		t.Errorf("pending must be exactly pending-sync and retry rows: %+v", pending)
+	}
+}

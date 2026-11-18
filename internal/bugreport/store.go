@@ -323,7 +323,7 @@ type Pending struct {
 
 func (s *Store) Pending() ([]Pending, error) {
 	rows, err := s.db.Query(`SELECT id, key, description, slug, path, app_version, created_at
-		FROM bug_reports WHERE sync_status = 'pending-sync' ORDER BY id`)
+		FROM bug_reports WHERE sync_status IN ('pending-sync','retry') ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +348,7 @@ type Queued struct {
 
 func (s *Store) Queued() ([]Queued, error) {
 	rows, err := s.db.Query(`SELECT id, job_id FROM bug_reports
-		WHERE sync_status IN ('queued','retry','uncertain') AND job_id IS NOT NULL AND job_id != '' ORDER BY id`)
+		WHERE sync_status IN ('queued','uncertain') AND job_id IS NOT NULL AND job_id != '' ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
