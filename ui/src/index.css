@@ -178,11 +178,13 @@
 .kiwi-prose .kiwi-callout-error {
   @apply border-l-destructive/50;
 }
-.kiwi-prose .kiwi-comment-mark {
-  @apply bg-primary/10 text-foreground rounded-sm cursor-pointer;
+/* Comment anchors are painted with the CSS Custom Highlight API (no DOM
+   wrappers), so only colour properties apply here. */
+::highlight(kiwi-comment) {
+  background-color: color-mix(in srgb, var(--primary) 15%, transparent);
 }
-.kiwi-prose .kiwi-comment-mark:hover {
-  @apply bg-primary/20;
+.kiwi-prose.kiwi-comment-hover {
+  cursor: pointer;
 }
 
 /* ─── Wide table horizontal scroll ─── */

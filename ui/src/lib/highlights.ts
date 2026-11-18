@@ -28,21 +28,9 @@ export function locateAnchor(text: string, a: CommentAnchor): AnchorLocation | n
 
 // Build the concatenated textContent of a container plus a parallel list of
 // (node, offset) mappings so a flat-string index can be resolved back to a
-// DOM Range. Skips already-wrapped highlight spans and their descendants to
-// keep re-application idempotent.
+// DOM Range.
 function collectText(root: HTMLElement): { text: string; nodes: Text[]; offsets: number[] } {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      let parent = node.parentElement;
-      while (parent && parent !== root) {
-        if (parent.dataset && parent.dataset.kiwiComment === "wrap") {
-          return NodeFilter.FILTER_REJECT;
-        }
-        parent = parent.parentElement;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
   const offsets: number[] = [];
   let text = "";
@@ -77,16 +65,12 @@ function positionFor(
   return { node, local };
 }
 
-// A wrapped range — one hit per call. Crossing DOM boundaries produces
-// multiple <span data-kiwi-comment="wrap"> wrappers for the same comment id.
-export type WrapResult = { id: string; spans: HTMLSpanElement[] } | null;
-
-export function wrapAnchor(
-  root: HTMLElement,
-  anchor: CommentAnchor,
-  id: string,
-  onClick: (id: string, rect: DOMRect) => void
-): WrapResult {
+// Resolve an anchor to a DOM Range over the rendered markdown. This never
+// touches the DOM: the prose subtree is owned by React, and splitting or
+// wrapping its text nodes made the next re-render throw "Failed to execute
+// 'insertBefore' on 'Node'" (the error boundary then hid the whole page).
+// Callers paint the range with the CSS Custom Highlight API instead.
+export function rangeForAnchor(root: HTMLElement, anchor: CommentAnchor): Range | null {
   const { text, nodes, offsets } = collectText(root);
   const loc = locateAnchor(text, anchor);
   if (!loc) return null;
@@ -102,58 +86,28 @@ export function wrapAnchor(
   } catch {
     return null;
   }
-
-  const spans: HTMLSpanElement[] = [];
-
-  // Split into per-text-node sub-ranges; Range.surroundContents throws when
-  // the boundary straddles element edges, so we do it manually by walking
-  // the involved text nodes between start and end.
-  const startIdx = nodes.indexOf(start.node);
-  const endIdx = nodes.indexOf(end.node);
-  if (startIdx < 0 || endIdx < 0) return null;
-
-  for (let i = startIdx; i <= endIdx; i++) {
-    const node = nodes[i];
-    const from = i === startIdx ? start.local : 0;
-    const to = i === endIdx ? end.local : node.data.length;
-    if (to <= from) continue;
-
-    const slice = node.splitText(from);
-    if (to - from < slice.data.length) {
-      slice.splitText(to - from);
-    }
-    const span = document.createElement("span");
-    span.dataset.kiwiComment = "wrap";
-    span.dataset.commentId = id;
-    span.className = "kiwi-comment-mark";
-    slice.parentNode?.insertBefore(span, slice);
-    span.appendChild(slice);
-    span.addEventListener("click", (e) => {
-      e.stopPropagation();
-      onClick(id, span.getBoundingClientRect());
-    });
-    spans.push(span);
-  }
-
-  return spans.length ? { id, spans } : null;
+  return range;
 }
 
-// Undo all wrapping done by wrapAnchor. Merges the text back into the
-// surrounding parent so React's reconciler still sees a clean subtree when
-// it next renders.
-export function clearWraps(root: HTMLElement) {
-  const wraps = root.querySelectorAll<HTMLSpanElement>(
-    'span[data-kiwi-comment="wrap"]'
-  );
-  wraps.forEach((span) => {
-    const parent = span.parentNode;
-    if (!parent) return;
-    while (span.firstChild) parent.insertBefore(span.firstChild, span);
-    parent.removeChild(span);
-  });
-  // Merge adjacent text nodes so repeated wrap/clear cycles don't fragment
-  // the DOM further.
-  root.normalize();
+type RectLike = { left: number; right: number; top: number; bottom: number };
+
+// Return the id of the first entry with a rect containing (x, y). Used to
+// turn a click on painted highlight text back into a comment id, since a
+// CSS highlight has no element to attach a listener to.
+export function hitTest<T extends { id: string; rects: ArrayLike<RectLike> }>(
+  entries: readonly T[],
+  x: number,
+  y: number
+): { entry: T; rect: RectLike } | null {
+  for (const entry of entries) {
+    for (let i = 0; i < entry.rects.length; i++) {
+      const r = entry.rects[i];
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+        return { entry, rect: r };
+      }
+    }
+  }
+  return null;
 }
 
 // Capture an anchor from the current window selection, constrained to
