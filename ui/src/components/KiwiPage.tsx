@@ -514,7 +514,7 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
       }
       if (trend?.time_series && trend.time_series.length > 0) {
         const weekTotal = trend.time_series.reduce((s, p) => s + p.count, 0);
-        if (weekTotal > 0 && viewCount !== weekTotal) {
+        if (weekTotal > 0) {
           setViewCount(weekTotal);
         }
       }

@@ -482,12 +482,21 @@ export class ReadAlongSession {
   }
 
   private async load(i: number): Promise<void> {
+    const chunkCtrl = new AbortController();
+    const onSessionAbort = () => chunkCtrl.abort();
+    this.ctrl.signal.addEventListener("abort", onSessionAbort, { once: true });
+    try {
+      await this.runLoad(i, chunkCtrl);
+    } finally {
+      this.ctrl.signal.removeEventListener("abort", onSessionAbort);
+    }
+  }
+
+  private async runLoad(i: number, chunkCtrl: AbortController): Promise<void> {
     const c = this.cs[i];
     c.status = "loading";
     this.emit();
-    const chunkCtrl = new AbortController();
     c.abort = chunkCtrl;
-    this.ctrl.signal.addEventListener("abort", () => chunkCtrl.abort(), { once: true });
     const signal = chunkCtrl.signal;
     for (;;) {
       c.attempts += 1;
@@ -502,7 +511,14 @@ export class ReadAlongSession {
         break;
       } catch (e) {
         if (this.stopped || signal.aborted || c.status !== "loading") return;
-        if (c.attempts <= this.opts.retries) continue;
+        if (c.attempts <= this.opts.retries) {
+          try {
+            await abortable(250 * c.attempts, signal);
+          } catch {
+            return;
+          }
+          continue;
+        }
         c.status = "error";
         c.error = e instanceof Error ? e.message : String(e);
         break;
@@ -528,6 +544,7 @@ export class ReadAlongSession {
       signal,
     });
     let item = first.body;
+    let envelope = first.body;
     if (first.status === 202) {
       const jobUrl = this.jobUrl(item);
       const deadline = Date.now() + this.opts.pollTimeoutMs;
@@ -535,6 +552,7 @@ export class ReadAlongSession {
         await abortable(this.opts.pollMs, signal);
         const { body } = await this.json(jobUrl, { signal });
         if (body.status === "complete") {
+          envelope = body;
           item = body.result ?? {};
           break;
         }
@@ -548,7 +566,7 @@ export class ReadAlongSession {
       const w = await this.json(`${ep}/media/${item.id}/words.json`, { signal });
       words = Array.isArray(w.body) ? w.body : w.body?.words;
     }
-    this.noteMeta(item?.meta ?? first.body?.meta);
+    this.noteMeta(item?.meta ?? envelope?.meta);
     if (!words) {
       console.warn(`read-along: no word timings for item ${item.id}; highlight disabled`);
     }
