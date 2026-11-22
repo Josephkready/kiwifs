@@ -153,17 +153,45 @@ export function rangeForSpoken(doc: SpeechDoc, start: number, end: number): Rang
   }
 }
 
+const nodeSpanCache = new WeakMap<SpeechDoc, Map<Text, number[]>>();
+
+function spansByNode(doc: SpeechDoc): Map<Text, number[]> {
+  let m = nodeSpanCache.get(doc);
+  if (!m) {
+    m = new Map<Text, number[]>();
+    for (let i = 0; i < doc.nodeIdx.length; i++) {
+      const ni = doc.nodeIdx[i];
+      if (ni < 0) continue;
+      const node = doc.nodes[ni];
+      let arr = m.get(node);
+      if (!arr) {
+        arr = [];
+        m.set(node, arr);
+      }
+      arr.push(i);
+    }
+    nodeSpanCache.set(doc, m);
+  }
+  return m;
+}
+
 /** Nearest spoken index at/after a DOM (text node, offset), or null. */
 export function spokenIndexFor(doc: SpeechDoc, node: Node, offset: number): number | null {
-  const ni = doc.nodes.indexOf(node as Text);
-  if (ni < 0) return null;
-  let best: number | null = null;
-  for (let i = 0; i < doc.nodeIdx.length; i++) {
-    if (doc.nodeIdx[i] !== ni) continue;
-    best = i;
-    if (doc.local[i] >= offset) return i;
+  const idxs = spansByNode(doc).get(node as Text);
+  if (!idxs || idxs.length === 0) return null;
+  let lo = 0;
+  let hi = idxs.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (doc.local[idxs[mid]] >= offset) {
+      found = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
   }
-  return best;
+  return found >= 0 ? idxs[found] : idxs[idxs.length - 1];
 }
 
 export type SpeechChunk = { index: number; text: string; base: number };
@@ -207,9 +235,10 @@ export function chunkSpeech(doc: SpeechDoc, maxChars = 1000): SpeechChunk[] {
 function splitOversize(text: string, s: number, e: number, max: number): { start: number; end: number }[] {
   const out: { start: number; end: number }[] = [];
   let pos = s;
+  let te = e;
+  while (te > pos && WS.test(text[te - 1])) te--;
   while (pos < e) {
-    const trimmedLen = text.slice(pos, e).trimEnd().length;
-    if (trimmedLen <= max) {
+    if (te - pos <= max) {
       out.push({ start: pos, end: e });
       break;
     }

@@ -111,6 +111,7 @@ type Internal = {
   duration: number;
   error?: string;
   attempts: number;
+  abort?: AbortController;
 };
 
 // 0.1 s of silence; played inside the click so autoplay policies unlock the element.
@@ -161,7 +162,7 @@ export class ReadAlongSession {
     this.state = this.compute();
     this.audio.addEventListener("ended", this.onEnded);
     this.audio.addEventListener("loadedmetadata", this.onMeta);
-    this.audio.addEventListener("timeupdate", this.emit);
+    this.audio.addEventListener("timeupdate", this.onTimeUpdate);
     this.audio.addEventListener("pause", this.onAudioPause);
     this.audio.addEventListener("playing", this.onAudioPlaying);
   }
@@ -289,6 +290,8 @@ export class ReadAlongSession {
   skipChunk(i: number): void {
     const c = this.cs[i];
     if (!c || (c.status !== "error" && c.status !== "idle" && c.status !== "loading")) return;
+    c.abort?.abort();
+    c.abort = undefined;
     c.status = "skipped";
     c.duration = 0;
     c.error = undefined;
@@ -303,7 +306,7 @@ export class ReadAlongSession {
     this.audio.pause();
     this.audio.removeEventListener("ended", this.onEnded);
     this.audio.removeEventListener("loadedmetadata", this.onMeta);
-    this.audio.removeEventListener("timeupdate", this.emit);
+    this.audio.removeEventListener("timeupdate", this.onTimeUpdate);
     this.audio.removeEventListener("pause", this.onAudioPause);
     this.audio.removeEventListener("playing", this.onAudioPlaying);
     this.audio.removeAttribute("src");
@@ -315,7 +318,25 @@ export class ReadAlongSession {
 
   // ── internals ──
 
+  private durCache: number[] | null = null;
+  private durKey: string[] = [];
+  private durKeyDur: number[] = [];
+
+  /** Cached until some chunk's status or duration changes (checked without allocating). */
   private durations(): number[] {
+    const n = this.cs.length;
+    let same = this.durCache !== null && this.durKey.length === n;
+    for (let i = 0; same && i < n; i++) {
+      if (this.durKey[i] !== this.cs[i].status || this.durKeyDur[i] !== this.cs[i].duration) same = false;
+    }
+    if (same) return this.durCache as number[];
+    this.durKey = this.cs.map((c) => c.status);
+    this.durKeyDur = this.cs.map((c) => c.duration);
+    this.durCache = this.computeDurations();
+    return this.durCache;
+  }
+
+  private computeDurations(): number[] {
     const known = this.cs.filter((c) => c.status === "ready" && c.duration > 0);
     let chars = 0;
     let secs = 0;
@@ -359,6 +380,14 @@ export class ReadAlongSession {
     this.phase = p;
     this.emit();
   }
+
+  private lastTick = 0;
+  private onTimeUpdate = () => {
+    const now = Date.now();
+    if (now - this.lastTick < 250) return;
+    this.lastTick = now;
+    this.emit();
+  };
 
   private onEnded = () => {
     if (this.loadedChunk !== this.cur) return;
@@ -452,12 +481,15 @@ export class ReadAlongSession {
     const c = this.cs[i];
     c.status = "loading";
     this.emit();
-    const signal = this.ctrl.signal;
+    const chunkCtrl = new AbortController();
+    c.abort = chunkCtrl;
+    this.ctrl.signal.addEventListener("abort", () => chunkCtrl.abort(), { once: true });
+    const signal = chunkCtrl.signal;
     for (;;) {
       c.attempts += 1;
       try {
         const res = await this.synthesize(this.opts.chunks[i].text, signal);
-        if (this.stopped) return;
+        if (this.stopped || c.status !== "loading") return;
         c.id = res.id;
         c.words = res.words;
         const last = res.words[res.words.length - 1];
@@ -465,7 +497,7 @@ export class ReadAlongSession {
         c.status = "ready";
         break;
       } catch (e) {
-        if (this.stopped || signal.aborted) return;
+        if (this.stopped || signal.aborted || c.status !== "loading") return;
         if (c.attempts <= this.opts.retries) continue;
         c.status = "error";
         c.error = e instanceof Error ? e.message : String(e);
@@ -511,6 +543,9 @@ export class ReadAlongSession {
     if (!words) {
       const w = await this.json(`${ep}/media/${item.id}/words.json`, { signal });
       words = Array.isArray(w.body) ? w.body : w.body?.words;
+    }
+    if (!words) {
+      console.warn(`read-along: no word timings for item ${item.id}; highlight disabled`);
     }
     return { id: item.id, words: words ?? [] };
   }

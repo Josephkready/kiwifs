@@ -675,7 +675,7 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                     <TooltipContent side="bottom">{isStarred ? "Unstar" : "Star"}</TooltipContent>
                   </Tooltip>
                 )}
-                <ReadAlongButton readAlong={readAlong} />
+                {features.tts && <ReadAlongButton readAlong={readAlong} />}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button

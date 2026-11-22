@@ -133,6 +133,31 @@ Sync endpoints (loopback, plus any `KIWIFS_BUG_INTERNAL_ALLOW` CIDRs): `GET /api
 
 ---
 
+## Read-along (text-to-speech)
+
+The web UI can read a page aloud with word-by-word highlighting. It is opt-in and needs an external speech service; nothing is sent anywhere unless you enable it.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `[ui.features] tts` | bool | `false` | Shows the read-along button in the page header. |
+| `[speech] endpoint` | string | `/api/speech` | Same-origin URL prefix the UI calls for synthesis. |
+
+Your reverse proxy must map these paths on the same origin to the speech service:
+
+- `<endpoint>/synthesize`
+- `<endpoint>/synthesize/jobs/<id>`
+- `<endpoint>/media/...`
+
+```toml
+[ui.features]
+tts = true
+
+[speech]
+endpoint = "/api/speech"
+```
+
+---
+
 ## Vector embedder options
 
 Semantic search needs an embedder and a vector store. Configure both under `[search.vector]` in `.kiwi/config.toml`:

@@ -1,6 +1,6 @@
 // Paints the word being spoken with the CSS Custom Highlight API and keeps it
 // in view. Nothing is ever inserted into the React-owned prose DOM (see
-// highlights.ts). Follows aloud/spec/TIMING-SPEC.md: rAF loop, last word with
+// speechText.ts for the spoken-index to DOM map). Follows aloud/spec/TIMING-SPEC.md: rAF loop, last word with
 // start <= t, hold through gaps, touch the DOM only when the index changes,
 // 38% anchor scrolling.
 
@@ -42,6 +42,7 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
 export function createSpeechHighlighter(opts: HighlighterOptions): SpeechHighlighter {
   const { root, source } = opts;
   let doc = opts.doc;
+  let seenRaw = root.textContent ?? "";
   let active = true;
   let raf = 0;
   let mutRaf = 0;
@@ -60,7 +61,8 @@ export function createSpeechHighlighter(opts: HighlighterOptions): SpeechHighlig
     if (canPaint) {
       try {
         registry!.set(SPEECH_HIGHLIGHT_NAME, new Highlight(range));
-      } catch {
+      } catch (err) {
+        console.warn("speech highlight paint failed", err);
         return false;
       }
     }
@@ -119,8 +121,9 @@ export function createSpeechHighlighter(opts: HighlighterOptions): SpeechHighlig
       // Unmappable word: keep the previous highlight and try again on the next index.
       lastKey = key;
       if (paint(start, start + w.word.length)) lastSpan = { start, end: start + w.word.length };
-    } catch {
+    } catch (err) {
       /* never let a bad word kill the loop */
+      console.warn("speech highlight tick failed; continuing", err);
     }
   };
 
@@ -132,9 +135,13 @@ export function createSpeechHighlighter(opts: HighlighterOptions): SpeechHighlig
     if (!active) return;
     cancelAnimationFrame(mutRaf);
     mutRaf = requestAnimationFrame(() => {
+      const raw = root.textContent ?? "";
+      if (raw === seenRaw && doc.nodes.every((n) => n.isConnected)) return;
+      seenRaw = raw;
       const next = extractSpeech(root);
       if (next.text !== doc.text) {
         // Content changed under us: stop highlighting, keep the audio.
+        console.warn("speech highlight disabled: prose text changed", { chunk: lastKey });
         active = false;
         clear();
         return;

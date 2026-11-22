@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { Pause, Play, RotateCcw, RotateCw, SkipForward, X } from "lucide-react";
 import { Button } from "@kw/components/ui/button";
 import { SPEEDS } from "@kw/lib/readAlongSession";
@@ -12,6 +13,15 @@ export function formatClock(sec: number): string {
 export function ReadAlongBar({ readAlong }: { readAlong: ReadAlong }) {
   const { session, state, stop } = readAlong;
   if (!session || !state) return null;
+  return <ReadAlongBarInner session={session} stop={stop} />;
+}
+
+function ReadAlongBarInner({ session, stop }: { session: NonNullable<ReadAlong["session"]>; stop: () => void }) {
+  // Subscribe to the session directly so clock ticks re-render only this bar.
+  const state = useSyncExternalStore(
+    (fn) => session.subscribe(fn),
+    () => session.getState(),
+  );
 
   const playing = state.phase === "playing";
   const nextSpeed = SPEEDS[(SPEEDS.indexOf(state.speed as (typeof SPEEDS)[number]) + 1) % SPEEDS.length];

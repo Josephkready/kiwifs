@@ -14,6 +14,23 @@ export type ReadAlong = {
   stop: () => void;
 };
 
+/** True when two states differ only in the fast-changing clock fields (time/duration). */
+function sameCoarse(a: SessionState | null, b: SessionState): boolean {
+  if (!a) return false;
+  return (
+    a.phase === b.phase &&
+    a.current === b.current &&
+    a.speed === b.speed &&
+    a.ready === b.ready &&
+    a.loading === b.loading &&
+    a.total === b.total &&
+    a.error?.chunk === b.error?.chunk &&
+    a.error?.message === b.error?.message &&
+    a.chunks.length === b.chunks.length &&
+    a.chunks.every((c, i) => c.status === b.chunks[i].status)
+  );
+}
+
 /** Owns one read-along session for the prose in `proseRef`; torn down when `resetKey` changes. */
 export function useReadAlong(proseRef: RefObject<HTMLElement | null>, endpoint: string, resetKey: string): ReadAlong {
   const [session, setSession] = useState<ReadAlongSession | null>(null);
@@ -45,7 +62,12 @@ export function useReadAlong(proseRef: RefObject<HTMLElement | null>, endpoint: 
     setEmpty(false);
     const s = new ReadAlongSession({ endpoint, chunks });
     const h = createSpeechHighlighter({ root, doc, source: s });
-    const unsub = s.subscribe(() => setState(s.getState()));
+    // Clock ticks (time/duration) are consumed by ReadAlongBar via the session
+    // directly, so they must not re-render the host page.
+    const unsub = s.subscribe(() => {
+      const next = s.getState();
+      setState((prev) => (sameCoarse(prev, next) ? prev : next));
+    });
     live.current = { s, h, unsub };
     setSession(s);
     setState(s.getState());
