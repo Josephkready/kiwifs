@@ -414,7 +414,8 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
   const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied" | "failed">("idle");
   const proseRef = useRef<HTMLDivElement>(null);
   const speechEndpoint = useUIConfigStore((s) => s.speechEndpoint);
-  const readAlong = useReadAlong(proseRef, speechEndpoint, path + "\u0000" + (content ?? "").length);
+  const speechMode = useUIConfigStore((s) => s.speechMode);
+  const readAlong = useReadAlong(proseRef, speechEndpoint, speechMode, path + "\u0000" + (content ?? "").length);
   const copyFeedbackTimer = useRef<number | null>(null);
 
   useEffect(() => () => {

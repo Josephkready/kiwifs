@@ -268,3 +268,32 @@ func TestUIConfig_TTSFlagAndSpeechEndpoint(t *testing.T) {
 		t.Fatalf("configured: tts=%v endpoint=%q", tts, ep)
 	}
 }
+
+func TestUIConfig_SpeechModeRoundTrip(t *testing.T) {
+	mode := func(s *Server) (string, bool) {
+		req := httptest.NewRequest(http.MethodGet, "/api/kiwi/ui-config", nil)
+		rec := httptest.NewRecorder()
+		s.echo.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d", rec.Code)
+		}
+		var res struct {
+			Speech map[string]any `json:"speech"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
+		v, ok := res.Speech["mode"].(string)
+		return v, ok
+	}
+	if m, ok := mode(buildTestServer(t)); ok || m != "" {
+		t.Fatalf("default should omit mode, got %q (present=%v)", m, ok)
+	}
+	dir, pipe, cstore := buildTestPipeline(t)
+	cfg := &config.Config{}
+	cfg.Storage.Root = dir
+	cfg.Speech.Mode = " fast "
+	if m, _ := mode(NewServer(cfg, pipe, nil, cstore, nil, nil, nil)); m != "fast" {
+		t.Fatalf("configured mode = %q, want fast", m)
+	}
+}

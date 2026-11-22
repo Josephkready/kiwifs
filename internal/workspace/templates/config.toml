@@ -65,6 +65,7 @@ type = "none"
 # to the service. Engine/voice are the service's own default.
 # [speech]
 # endpoint = "/api/speech"
+# mode = "fast"      # optional; forwarded as {"mode"} ("default" | "fast"). Omitted when empty.
 #
 # [ui.toolbar]
 # views = []

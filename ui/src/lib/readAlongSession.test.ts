@@ -114,6 +114,36 @@ describe("ReadAlongSession", () => {
     s.stop();
   });
 
+  it("includes mode in the POST body only when configured", async () => {
+    const run = async (extra: Record<string, unknown>) => {
+      const bodies: string[] = [];
+      const f = ((_url: string, init?: RequestInit) => {
+        if (init?.method === "POST") bodies.push(init.body as string);
+        return json(200, { id: "x", words: words(3) });
+      }) as unknown as typeof fetch;
+      const { s } = make(f, { prefetch: 0, ...extra });
+      s.start();
+      await settle(() => bodies.length > 0);
+      s.stop();
+      return JSON.parse(bodies[0]);
+    };
+    expect(await run({ mode: "fast" })).toEqual({ text: "ab ab ab", mode: "fast" });
+    expect(await run({ mode: "" })).toEqual({ text: "ab ab ab" });
+    expect(await run({})).toEqual({ text: "ab ab ab" });
+  });
+
+  it("warns once per session when the service reports a fallback", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = (() => json(200, { id: "x", words: words(3), meta: { mode: "default", fallback_reason: "cartesia down" } })) as unknown as typeof fetch;
+    const { s } = make(f);
+    s.start();
+    await settle(() => s.getState().chunks.every((c) => c.status === "ready"));
+    const calls = warn.mock.calls.filter((c) => String(c[0]).includes("fell back"));
+    expect(calls).toHaveLength(1);
+    warn.mockRestore();
+    s.stop();
+  });
+
   it("retries once, then reports a per-chunk error that Skip resolves", async () => {
     let attempts0 = 0;
     const f = ((url: string, init?: RequestInit) => {

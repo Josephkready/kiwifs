@@ -12,6 +12,7 @@ type UIConfigState = {
   features: Record<UIFeatureKey, boolean>;
   toolbarViews: string[] | null | undefined;
   speechEndpoint: string;
+  speechMode: string;
   loaded: boolean;
   load: () => Promise<void>;
 };
@@ -22,6 +23,7 @@ export const useUIConfigStore = create<UIConfigState>((set) => ({
   features: DEFAULT_UI_FEATURES,
   toolbarViews: undefined,
   speechEndpoint: DEFAULT_SPEECH_ENDPOINT,
+  speechMode: "",
   loaded: false,
   load: async () => {
     try {
@@ -32,6 +34,7 @@ export const useUIConfigStore = create<UIConfigState>((set) => ({
         features: resolveUIFeatures(config.features),
         toolbarViews: config.toolbarViews ?? null,
         speechEndpoint: config.speech?.endpoint || DEFAULT_SPEECH_ENDPOINT,
+        speechMode: config.speech?.mode?.trim() ?? "",
         loaded: true,
       });
     } catch {
@@ -41,6 +44,7 @@ export const useUIConfigStore = create<UIConfigState>((set) => ({
         features: DEFAULT_UI_FEATURES,
         toolbarViews: null,
         speechEndpoint: DEFAULT_SPEECH_ENDPOINT,
+        speechMode: "",
         loaded: true,
       });
     }

@@ -282,6 +282,14 @@ const DefaultSpeechEndpoint = "/api/speech"
 // configurable here: the service's own default is authoritative.
 type SpeechConfig struct {
 	Endpoint string `toml:"endpoint"`
+	// Mode is an optional synthesis mode forwarded to the service ("default" |
+	// "fast"). Empty (default) means the UI omits it from the request.
+	Mode string `toml:"mode"`
+}
+
+// ResolvedMode returns the trimmed mode, "" when unset.
+func (s SpeechConfig) ResolvedMode() string {
+	return strings.TrimSpace(s.Mode)
 }
 
 // ResolvedEndpoint returns the endpoint prefix, defaulting to /api/speech.

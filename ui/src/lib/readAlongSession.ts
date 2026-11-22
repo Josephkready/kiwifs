@@ -6,8 +6,8 @@
 // {id, words?, ...} inline, or 202 {job_id, status_url} -> poll
 // GET {endpoint}/synthesize/jobs/{job_id} -> {status, result}. A job's
 // `result` carries NO words (only inline responses do), so words are fetched
-// from {endpoint}/media/{id}/words.json when absent. Only `text` is ever sent:
-// engine and voice belong to the service.
+// from {endpoint}/media/{id}/words.json when absent. Only `text` (plus an optional
+// configured `mode`) is ever sent: engine and voice belong to the service.
 
 import type { SpeechChunk } from "./speechText";
 
@@ -95,6 +95,8 @@ export function activeWordIndex(words: SpeechWord[], t: number): number {
 
 export type SessionOptions = {
   endpoint: string;
+  /** Optional service mode ("default" | "fast"); omitted from the POST when empty. */
+  mode?: string;
   chunks: SpeechChunk[];
   fetchImpl?: typeof fetch;
   audio?: HTMLAudioElement;
@@ -133,6 +135,7 @@ const abortable = (ms: number, signal: AbortSignal) =>
   });
 
 export class ReadAlongSession {
+  private warnedMeta = false;
   private opts: Required<Omit<SessionOptions, "audio" | "fetchImpl">> & { fetchImpl: typeof fetch };
   private audio: HTMLAudioElement;
   private ctrl = new AbortController();
@@ -150,6 +153,7 @@ export class ReadAlongSession {
   constructor(options: SessionOptions) {
     this.opts = {
       endpoint: options.endpoint.replace(/\/+$/, ""),
+      mode: (options.mode ?? "").trim(),
       chunks: options.chunks,
       prefetch: options.prefetch ?? 2,
       pollMs: options.pollMs ?? 500,
@@ -516,11 +520,11 @@ export class ReadAlongSession {
 
   private async synthesize(text: string, signal: AbortSignal): Promise<{ id: string; words: SpeechWord[] }> {
     const ep = this.opts.endpoint;
-    // Only text: engine/voice are the service's decision.
+    // Only text (+ optional mode): engine/voice are the service's decision.
     const first = await this.json(`${ep}/synthesize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(this.opts.mode ? { text, mode: this.opts.mode } : { text }),
       signal,
     });
     let item = first.body;
@@ -544,10 +548,19 @@ export class ReadAlongSession {
       const w = await this.json(`${ep}/media/${item.id}/words.json`, { signal });
       words = Array.isArray(w.body) ? w.body : w.body?.words;
     }
+    this.noteMeta(item?.meta ?? first.body?.meta);
     if (!words) {
       console.warn(`read-along: no word timings for item ${item.id}; highlight disabled`);
     }
     return { id: item.id, words: words ?? [] };
+  }
+
+  /** Log a service fallback indicator (meta.fallback_reason / meta.mode) once per session. */
+  private noteMeta(meta: any): void {
+    if (this.warnedMeta || !meta || typeof meta !== "object") return;
+    if (!meta.fallback_reason) return;
+    this.warnedMeta = true;
+    console.warn(`read-along: speech service fell back (mode=${meta.mode ?? "?"}): ${meta.fallback_reason}`);
   }
 
   /** status_url is an upstream path (/synthesize/jobs/<id>): re-root it under the endpoint. */
