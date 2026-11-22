@@ -628,6 +628,7 @@ export const api = {
     };
     features?: Partial<Record<UIFeatureKey, boolean>>;
     toolbarViews?: string[] | null;
+    speech?: { endpoint?: string };
   }> {
     return request(`${kiwiBase()}/ui-config`);
   },

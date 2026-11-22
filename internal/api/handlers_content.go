@@ -370,6 +370,11 @@ type uiConfigResponse struct {
 	Branding     brandingConfigResponse `json:"branding"`
 	Features     map[string]bool        `json:"features"`
 	ToolbarViews *[]string              `json:"toolbarViews"`
+	Speech       speechConfigResponse   `json:"speech"`
+}
+
+type speechConfigResponse struct {
+	Endpoint string `json:"endpoint"`
 }
 
 // UIConfig godoc
@@ -419,6 +424,7 @@ func (h *Handlers) UIConfig(c echo.Context) error {
 		},
 		Features:     h.ui.Features.Resolved(),
 		ToolbarViews: toolbarViews,
+		Speech:       speechConfigResponse{Endpoint: h.speech.ResolvedEndpoint()},
 	})
 }
 

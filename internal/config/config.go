@@ -20,6 +20,7 @@ type Config struct {
 	Auth       AuthConfig       `toml:"auth"`
 	Assets     AssetsConfig     `toml:"assets"`
 	UI         UIConfig         `toml:"ui"`
+	Speech     SpeechConfig     `toml:"speech"`
 	Backup     BackupConfig     `toml:"backup"`
 	Janitor    JanitorConfig    `toml:"janitor"`
 	Dataview   DataviewConfig   `toml:"dataview"`
@@ -271,6 +272,24 @@ func (b BackupConfig) IsRebaseBeforePush() bool {
 //	views = ["graph", "kanban", "bases"]
 type ToolbarConfig struct {
 	Views []string `toml:"views"`
+}
+
+// DefaultSpeechEndpoint is the same-origin prefix the read-along UI calls.
+const DefaultSpeechEndpoint = "/api/speech"
+
+// SpeechConfig configures the external speech service used by the read-along
+// feature ([speech] in config.toml). Engine and voice are deliberately not
+// configurable here: the service's own default is authoritative.
+type SpeechConfig struct {
+	Endpoint string `toml:"endpoint"`
+}
+
+// ResolvedEndpoint returns the endpoint prefix, defaulting to /api/speech.
+func (s SpeechConfig) ResolvedEndpoint() string {
+	if e := strings.TrimRight(strings.TrimSpace(s.Endpoint), "/"); e != "" {
+		return e
+	}
+	return DefaultSpeechEndpoint
 }
 
 // UIConfig controls frontend behaviour. Toggled via [ui] in config.toml.

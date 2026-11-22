@@ -183,6 +183,15 @@
 ::highlight(kiwi-comment) {
   background-color: color-mix(in srgb, var(--primary) 15%, transparent);
 }
+/* Read-along word. Colour-only (Highlight API), distinct from comments: a
+   warm amber wash that stays legible on both light and dark backgrounds. */
+::highlight(kiwi-speech) {
+  background-color: color-mix(in srgb, #f59e0b 38%, transparent);
+  color: inherit;
+}
+.dark ::highlight(kiwi-speech) {
+  background-color: color-mix(in srgb, #fbbf24 34%, transparent);
+}
 .kiwi-prose.kiwi-comment-hover {
   cursor: pointer;
 }

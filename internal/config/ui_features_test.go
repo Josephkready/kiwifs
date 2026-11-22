@@ -33,3 +33,24 @@ func TestUIFeaturesConfigIsEnabledUnknown(t *testing.T) {
 		t.Fatal("unknown feature names should default to enabled")
 	}
 }
+
+// The read-along flag needs an external service, so it is opt-in (unlike every
+// other flag, which defaults on).
+func TestUIFeaturesTTSDefaultsOff(t *testing.T) {
+	if (UIFeaturesConfig{}).Resolved()["tts"] {
+		t.Fatal("tts must default to false")
+	}
+	on := true
+	if !(UIFeaturesConfig{TTS: &on}).Resolved()["tts"] {
+		t.Fatal("tts=true must enable")
+	}
+}
+
+func TestSpeechEndpointDefault(t *testing.T) {
+	if got := (SpeechConfig{}).ResolvedEndpoint(); got != "/api/speech" {
+		t.Fatalf("got %q", got)
+	}
+	if got := (SpeechConfig{Endpoint: " /tts/ "}).ResolvedEndpoint(); got != "/tts" {
+		t.Fatalf("got %q", got)
+	}
+}

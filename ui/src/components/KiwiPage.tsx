@@ -22,6 +22,9 @@ import { KiwiComments } from "./KiwiComments";
 import { KiwiQuery } from "./KiwiQuery";
 import { PageActions } from "./PageActions";
 import { PublishButton } from "./PublishButton";
+import { ReadAlongButton } from "./ReadAlongButton";
+import { ReadAlongBar } from "./ReadAlongBar";
+import { useReadAlong } from "@kw/lib/useReadAlong";
 import { ShikiCode } from "./ShikiCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { KiwiChart } from "./KiwiChart";
@@ -410,6 +413,8 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
   const [localNote, setLocalNote] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied" | "failed">("idle");
   const proseRef = useRef<HTMLDivElement>(null);
+  const speechEndpoint = useUIConfigStore((s) => s.speechEndpoint);
+  const readAlong = useReadAlong(proseRef, speechEndpoint, path + "\u0000" + (content ?? "").length);
   const copyFeedbackTimer = useRef<number | null>(null);
 
   useEffect(() => () => {
@@ -670,6 +675,7 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
                     <TooltipContent side="bottom">{isStarred ? "Unstar" : "Star"}</TooltipContent>
                   </Tooltip>
                 )}
+                <ReadAlongButton readAlong={readAlong} />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -1269,6 +1275,7 @@ export function KiwiPage({ path = "", content: contentProp, tree, onNavigate, on
           </div>
         </div>
       </div>
+      {features.tts && <ReadAlongBar readAlong={readAlong} />}
     </div>
   );
 }
