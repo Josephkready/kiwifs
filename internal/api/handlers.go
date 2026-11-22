@@ -46,6 +46,7 @@ type Handlers struct {
 	shares       *rbac.ShareStore
 	assets       config.AssetsConfig
 	ui           config.UIConfig
+	speech       config.SpeechConfig
 	root         string
 	publicURL    string
 	linkResolver *links.Resolver

@@ -450,6 +450,7 @@ func (s *Server) setupRoutes() {
 		shares:               s.shares,
 		assets:               s.cfg.Assets,
 		ui:                   s.cfg.UI,
+		speech:               s.cfg.Speech,
 		root:                 s.pipe.Store.AbsPath(""),
 		janitorSched:         s.janitorSched,
 		janitorStaleDays:     s.cfg.Janitor.StaleDays,

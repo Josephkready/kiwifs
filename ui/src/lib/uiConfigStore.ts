@@ -3,6 +3,7 @@ import { api } from "./api";
 import { DEFAULT_BRANDING, resolveBranding, type BrandingConfig } from "./branding";
 import { DEFAULT_UI_FEATURES, resolveUIFeatures, type UIFeatureKey } from "./uiFeatures";
 
+export const DEFAULT_SPEECH_ENDPOINT = "/api/speech";
 export const THEME_LOCKED_TOOLTIP = "Theme locked by admin";
 
 type UIConfigState = {
@@ -10,6 +11,7 @@ type UIConfigState = {
   branding: BrandingConfig;
   features: Record<UIFeatureKey, boolean>;
   toolbarViews: string[] | null | undefined;
+  speechEndpoint: string;
   loaded: boolean;
   load: () => Promise<void>;
 };
@@ -19,6 +21,7 @@ export const useUIConfigStore = create<UIConfigState>((set) => ({
   branding: DEFAULT_BRANDING,
   features: DEFAULT_UI_FEATURES,
   toolbarViews: undefined,
+  speechEndpoint: DEFAULT_SPEECH_ENDPOINT,
   loaded: false,
   load: async () => {
     try {
@@ -28,6 +31,7 @@ export const useUIConfigStore = create<UIConfigState>((set) => ({
         branding: resolveBranding(config.branding ?? {}),
         features: resolveUIFeatures(config.features),
         toolbarViews: config.toolbarViews ?? null,
+        speechEndpoint: config.speech?.endpoint || DEFAULT_SPEECH_ENDPOINT,
         loaded: true,
       });
     } catch {
@@ -36,6 +40,7 @@ export const useUIConfigStore = create<UIConfigState>((set) => ({
         branding: DEFAULT_BRANDING,
         features: DEFAULT_UI_FEATURES,
         toolbarViews: null,
+        speechEndpoint: DEFAULT_SPEECH_ENDPOINT,
         loaded: true,
       });
     }

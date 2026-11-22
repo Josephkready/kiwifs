@@ -58,6 +58,13 @@ type = "none"
 # edit = false
 # history = false
 # publish = false
+# tts = true         # read-along button; OFF unless set (needs a speech service)
+#
+# Read-along (text-to-speech) speech service. The UI POSTs only {text} to
+# <endpoint>/synthesize on the SAME origin; your reverse proxy maps the prefix
+# to the service. Engine/voice are the service's own default.
+# [speech]
+# endpoint = "/api/speech"
 #
 # [ui.toolbar]
 # views = []

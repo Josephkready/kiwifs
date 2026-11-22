@@ -1,7 +1,7 @@
 package config
 
 // UIFeaturesConfig toggles chrome via [ui.features] in config.toml.
-// Unset fields default to true for backward compatibility.
+// Unset fields default to true for backward compatibility, except "tts" (opt-in).
 type UIFeaturesConfig struct {
 	Graph       *bool `toml:"graph"`
 	Kanban      *bool `toml:"kanban"`
@@ -13,6 +13,9 @@ type UIFeaturesConfig struct {
 	Edit        *bool `toml:"edit"`
 	History     *bool `toml:"history"`
 	Publish     *bool `toml:"publish"`
+	// TTS enables the read-along (text-to-speech) button. Unlike the other
+	// flags it defaults to FALSE: it needs an external speech service.
+	TTS *bool `toml:"tts"`
 }
 
 func featureEnabled(v *bool) bool {
@@ -32,6 +35,7 @@ func (f UIFeaturesConfig) Resolved() map[string]bool {
 		"edit":         featureEnabled(f.Edit),
 		"history":      featureEnabled(f.History),
 		"publish":      featureEnabled(f.Publish),
+		"tts":          f.TTS != nil && *f.TTS,
 	}
 }
 

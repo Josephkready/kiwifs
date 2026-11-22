@@ -232,3 +232,39 @@ func TestUIConfig_SidebarFromConfig(t *testing.T) {
 		t.Fatalf("sections = %+v", res.Sidebar.Sections)
 	}
 }
+
+func TestUIConfig_TTSFlagAndSpeechEndpoint(t *testing.T) {
+	get := func(s *Server) (bool, string) {
+		req := httptest.NewRequest(http.MethodGet, "/api/kiwi/ui-config", nil)
+		rec := httptest.NewRecorder()
+		s.echo.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d", rec.Code)
+		}
+		var res struct {
+			Features map[string]bool `json:"features"`
+			Speech   struct {
+				Endpoint string `json:"endpoint"`
+			} `json:"speech"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
+		return res.Features["tts"], res.Speech.Endpoint
+	}
+	tts, ep := get(buildTestServer(t))
+	if tts || ep != "/api/speech" {
+		t.Fatalf("defaults: tts=%v endpoint=%q", tts, ep)
+	}
+
+	dir, pipe, cstore := buildTestPipeline(t)
+	cfg := &config.Config{}
+	cfg.Storage.Root = dir
+	on := true
+	cfg.UI.Features.TTS = &on
+	cfg.Speech.Endpoint = "/speech"
+	tts, ep = get(NewServer(cfg, pipe, nil, cstore, nil, nil, nil))
+	if !tts || ep != "/speech" {
+		t.Fatalf("configured: tts=%v endpoint=%q", tts, ep)
+	}
+}

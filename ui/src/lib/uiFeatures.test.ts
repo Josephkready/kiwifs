@@ -30,3 +30,14 @@ describe("uiFeatures", () => {
     expect(isViewRouteAllowed("/view/graph", features)).toBe(true);
   });
 });
+
+describe("tts flag", () => {
+  it("is off by default while every other flag is on", () => {
+    expect(resolveUIFeatures({}).tts).toBe(false);
+    expect(resolveUIFeatures(undefined).tts).toBe(false);
+    for (const [k, v] of Object.entries(DEFAULT_UI_FEATURES)) if (k !== "tts") expect(v).toBe(true);
+  });
+  it("turns on only when the server enables it", () => {
+    expect(resolveUIFeatures({ tts: true }).tts).toBe(true);
+  });
+});

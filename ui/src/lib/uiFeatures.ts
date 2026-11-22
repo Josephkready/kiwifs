@@ -8,7 +8,8 @@ export type UIFeatureKey =
   | "data_sources"
   | "edit"
   | "history"
-  | "publish";
+  | "publish"
+  | "tts";
 
 export const DEFAULT_UI_FEATURES: Record<UIFeatureKey, boolean> = {
   graph: true,
@@ -21,6 +22,8 @@ export const DEFAULT_UI_FEATURES: Record<UIFeatureKey, boolean> = {
   edit: true,
   history: true,
   publish: true,
+  // Read-along needs an external speech service, so it is opt-in.
+  tts: false,
 };
 
 /** Maps /view/{name} path segments to feature keys. */
