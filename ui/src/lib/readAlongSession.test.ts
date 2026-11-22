@@ -144,6 +144,44 @@ describe("ReadAlongSession", () => {
     s.stop();
   });
 
+  it("warns on a top-level fallback_reason (apl response shape)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = (() => json(200, { id: "x", words: words(3), mode: "default", mode_requested: "fast", fallback_reason: "cartesia down" })) as unknown as typeof fetch;
+    const { s } = make(f);
+    s.start();
+    await settle(() => s.getState().chunks.every((c) => c.status === "ready"));
+    const calls = warn.mock.calls.filter((c) => String(c[0]).includes("fell back") && String(c[0]).includes("cartesia down"));
+    expect(calls).toHaveLength(1);
+    warn.mockRestore();
+    s.stop();
+  });
+
+  it("never has more than 2 synth requests in flight, even with a large prefetch", async () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({ index: i, text: `chunk ${i}`, base: i * 10 }));
+    let inFlight = 0;
+    let peak = 0;
+    let started = 0;
+    const f = ((_url: string, init?: RequestInit) => {
+      if (init?.method !== "POST") return json(404, {});
+      started++;
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      return new Promise<Response>((resolve) =>
+        setTimeout(() => {
+          inFlight--;
+          resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: `i${started}`, words: words(3) }) } as Response);
+        }, 15),
+      );
+    }) as unknown as typeof fetch;
+    const { s } = make(f, { chunks: many, prefetch: 5 });
+    s.start();
+    await settle(() => started >= 2);
+    expect(peak).toBe(2);
+    await settle(() => s.getState().chunks.filter((c) => c.status === "ready").length >= 4);
+    expect(peak).toBe(2);
+    s.stop();
+  });
+
   it("retries once, then reports a per-chunk error that Skip resolves", async () => {
     let attempts0 = 0;
     const f = ((url: string, init?: RequestInit) => {

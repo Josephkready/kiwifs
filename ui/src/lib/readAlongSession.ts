@@ -93,6 +93,9 @@ export function activeWordIndex(words: SpeechWord[], t: number): number {
 
 // ── Session ────────────────────────────────────────────────────────────────
 
+/** Max concurrent /synthesize requests (the paid engine's concurrency). */
+const MAX_IN_FLIGHT = 2;
+
 export type SessionOptions = {
   endpoint: string;
   /** Optional service mode ("default" | "fast"); omitted from the POST when empty. */
@@ -155,7 +158,7 @@ export class ReadAlongSession {
       endpoint: options.endpoint.replace(/\/+$/, ""),
       mode: (options.mode ?? "").trim(),
       chunks: options.chunks,
-      prefetch: options.prefetch ?? 2,
+      prefetch: options.prefetch ?? 1,
       pollMs: options.pollMs ?? 500,
       pollTimeoutMs: options.pollTimeoutMs ?? 10 * 60_000,
       retries: options.retries ?? 1,
@@ -474,21 +477,46 @@ export class ReadAlongSession {
     }
   }
 
+  /**
+   * Keep the current chunk plus `prefetch` (default 1) ahead loading, never more than
+   * MAX_IN_FLIGHT requests at once (the paid engine allows 2 concurrent). Loads left
+   * over from before a seek, outside the window, are aborted to free a slot.
+   */
   private prefetch(): void {
     const end = Math.min(this.cs.length - 1, this.cur + this.opts.prefetch);
-    for (let i = this.cur; i <= end; i++) {
-      if (this.cs[i].status === "idle") void this.load(i);
+    for (let i = 0; i < this.cs.length; i++) {
+      const c = this.cs[i];
+      if ((i < this.cur || i > end) && c.status === "loading") {
+        c.abort?.abort();
+        c.abort = undefined;
+        c.status = "idle";
+        c.attempts = 0;
+      }
+    }
+    let inFlight = this.runs.size;
+    for (let i = this.cur; i <= end && inFlight < MAX_IN_FLIGHT; i++) {
+      if (this.cs[i].status === "idle") {
+        inFlight++;
+        void this.load(i);
+      }
     }
   }
+
+  /** Runs whose fetch has not yet settled, including aborted ones still counted against the cap. */
+  private runs = new Set<AbortController>();
 
   private async load(i: number): Promise<void> {
     const chunkCtrl = new AbortController();
     const onSessionAbort = () => chunkCtrl.abort();
     this.ctrl.signal.addEventListener("abort", onSessionAbort, { once: true });
+    this.runs.add(chunkCtrl);
     try {
       await this.runLoad(i, chunkCtrl);
     } finally {
       this.ctrl.signal.removeEventListener("abort", onSessionAbort);
+      this.runs.delete(chunkCtrl);
+      // An aborted run freed its slot only now; pump any queued chunk.
+      if (chunkCtrl.signal.aborted && !this.stopped) this.syncAudio();
     }
   }
 
@@ -502,7 +530,7 @@ export class ReadAlongSession {
       c.attempts += 1;
       try {
         const res = await this.synthesize(this.opts.chunks[i].text, signal);
-        if (this.stopped || c.status !== "loading") return;
+        if (this.stopped || signal.aborted || c.abort !== chunkCtrl || c.status !== "loading") return;
         c.id = res.id;
         c.words = res.words;
         const last = res.words[res.words.length - 1];
@@ -510,7 +538,7 @@ export class ReadAlongSession {
         c.status = "ready";
         break;
       } catch (e) {
-        if (this.stopped || signal.aborted || c.status !== "loading") return;
+        if (this.stopped || signal.aborted || c.abort !== chunkCtrl || c.status !== "loading") return;
         if (c.attempts <= this.opts.retries) {
           try {
             await abortable(250 * c.attempts, signal);
@@ -566,19 +594,22 @@ export class ReadAlongSession {
       const w = await this.json(`${ep}/media/${item.id}/words.json`, { signal });
       words = Array.isArray(w.body) ? w.body : w.body?.words;
     }
-    this.noteMeta(item?.meta ?? envelope?.meta);
+    // apl reports mode/fallback_reason at the TOP level of an inline response (a 202
+    // job's result does not carry them); meta is a harmless fallback.
+    this.noteMeta(first.body, item, envelope, item?.meta, envelope?.meta);
     if (!words) {
       console.warn(`read-along: no word timings for item ${item.id}; highlight disabled`);
     }
     return { id: item.id, words: words ?? [] };
   }
 
-  /** Log a service fallback indicator (meta.fallback_reason / meta.mode) once per session. */
-  private noteMeta(meta: any): void {
-    if (this.warnedMeta || !meta || typeof meta !== "object") return;
-    if (!meta.fallback_reason) return;
+  /** Log a service fallback indicator (fallback_reason / mode) once per session. */
+  private noteMeta(...sources: any[]): void {
+    if (this.warnedMeta) return;
+    const src = sources.find((m) => m && typeof m === "object" && m.fallback_reason);
+    if (!src) return;
     this.warnedMeta = true;
-    console.warn(`read-along: speech service fell back (mode=${meta.mode ?? "?"}): ${meta.fallback_reason}`);
+    console.warn(`read-along: speech service fell back (mode=${src.mode ?? "?"}): ${src.fallback_reason}`);
   }
 
   /** status_url is an upstream path (/synthesize/jobs/<id>): re-root it under the endpoint. */
