@@ -493,7 +493,7 @@ export class ReadAlongSession {
         c.attempts = 0;
       }
     }
-    let inFlight = this.cs.filter((c) => c.status === "loading").length;
+    let inFlight = this.runs.size;
     for (let i = this.cur; i <= end && inFlight < MAX_IN_FLIGHT; i++) {
       if (this.cs[i].status === "idle") {
         inFlight++;
@@ -502,14 +502,21 @@ export class ReadAlongSession {
     }
   }
 
+  /** Runs whose fetch has not yet settled, including aborted ones still counted against the cap. */
+  private runs = new Set<AbortController>();
+
   private async load(i: number): Promise<void> {
     const chunkCtrl = new AbortController();
     const onSessionAbort = () => chunkCtrl.abort();
     this.ctrl.signal.addEventListener("abort", onSessionAbort, { once: true });
+    this.runs.add(chunkCtrl);
     try {
       await this.runLoad(i, chunkCtrl);
     } finally {
       this.ctrl.signal.removeEventListener("abort", onSessionAbort);
+      this.runs.delete(chunkCtrl);
+      // An aborted run freed its slot only now; pump any queued chunk.
+      if (chunkCtrl.signal.aborted && !this.stopped) this.syncAudio();
     }
   }
 
@@ -523,7 +530,7 @@ export class ReadAlongSession {
       c.attempts += 1;
       try {
         const res = await this.synthesize(this.opts.chunks[i].text, signal);
-        if (this.stopped || c.status !== "loading") return;
+        if (this.stopped || signal.aborted || c.abort !== chunkCtrl || c.status !== "loading") return;
         c.id = res.id;
         c.words = res.words;
         const last = res.words[res.words.length - 1];
@@ -531,7 +538,7 @@ export class ReadAlongSession {
         c.status = "ready";
         break;
       } catch (e) {
-        if (this.stopped || signal.aborted || c.status !== "loading") return;
+        if (this.stopped || signal.aborted || c.abort !== chunkCtrl || c.status !== "loading") return;
         if (c.attempts <= this.opts.retries) {
           try {
             await abortable(250 * c.attempts, signal);
