@@ -375,6 +375,7 @@ type uiConfigResponse struct {
 
 type speechConfigResponse struct {
 	Endpoint string `json:"endpoint"`
+	Mode     string `json:"mode,omitempty"`
 }
 
 // UIConfig godoc
@@ -424,7 +425,7 @@ func (h *Handlers) UIConfig(c echo.Context) error {
 		},
 		Features:     h.ui.Features.Resolved(),
 		ToolbarViews: toolbarViews,
-		Speech:       speechConfigResponse{Endpoint: h.speech.ResolvedEndpoint()},
+		Speech:       speechConfigResponse{Endpoint: h.speech.ResolvedEndpoint(), Mode: h.speech.ResolvedMode()},
 	})
 }
 

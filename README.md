@@ -141,6 +141,7 @@ The web UI can read a page aloud with word-by-word highlighting. It is opt-in an
 |---|---|---|---|
 | `[ui.features] tts` | bool | `false` | Shows the read-along button in the page header. |
 | `[speech] endpoint` | string | `/api/speech` | Same-origin URL prefix the UI calls for synthesis. |
+| `[speech] mode` | string | `""` (omitted) | Optional synthesis mode sent to the service as `{"mode": ...}` (e.g. `"default"` or `"fast"`). Engine and voice are still never sent. |
 
 Your reverse proxy must map these paths on the same origin to the speech service:
 

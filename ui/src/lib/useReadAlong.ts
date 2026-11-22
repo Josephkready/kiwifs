@@ -32,7 +32,7 @@ function sameCoarse(a: SessionState | null, b: SessionState): boolean {
 }
 
 /** Owns one read-along session for the prose in `proseRef`; torn down when `resetKey` changes. */
-export function useReadAlong(proseRef: RefObject<HTMLElement | null>, endpoint: string, resetKey: string): ReadAlong {
+export function useReadAlong(proseRef: RefObject<HTMLElement | null>, endpoint: string, mode: string, resetKey: string): ReadAlong {
   const [session, setSession] = useState<ReadAlongSession | null>(null);
   const [state, setState] = useState<SessionState | null>(null);
   const [empty, setEmpty] = useState(false);
@@ -60,7 +60,7 @@ export function useReadAlong(proseRef: RefObject<HTMLElement | null>, endpoint: 
       return;
     }
     setEmpty(false);
-    const s = new ReadAlongSession({ endpoint, chunks });
+    const s = new ReadAlongSession({ endpoint, mode, chunks });
     const h = createSpeechHighlighter({ root, doc, source: s });
     // Clock ticks (time/duration) are consumed by ReadAlongBar via the session
     // directly, so they must not re-render the host page.
@@ -72,7 +72,7 @@ export function useReadAlong(proseRef: RefObject<HTMLElement | null>, endpoint: 
     setSession(s);
     setState(s.getState());
     s.start();
-  }, [proseRef, endpoint, stop]);
+  }, [proseRef, endpoint, mode, stop]);
 
   useEffect(() => () => stop(), [resetKey, stop]);
   useEffect(() => {
