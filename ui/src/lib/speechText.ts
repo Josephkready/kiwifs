@@ -202,18 +202,31 @@ export type SpeechChunk = { index: number; text: string; base: number };
  * last resort) arbitrary boundaries. Each chunk's `base` is the spoken index of
  * its first char, so `char_offset + base` addresses the full spoken string.
  */
-export function chunkSpeech(doc: SpeechDoc, maxChars = 1000): SpeechChunk[] {
+export function chunkSpeech(doc: SpeechDoc, maxChars = 1000, firstChars = 0): SpeechChunk[] {
   const text = doc.text;
   type Unit = { start: number; end: number };
   const units: Unit[] = [];
   const starts = doc.blockStarts;
+  const chunks: SpeechChunk[] = [];
+  // Short first chunk: the paid engine buffers a whole chunk before returning, so a
+  // small head chunk gets audio playing quickly; the rest is chunked as usual (chunk 2
+  // is a normal chunk, requested in parallel with chunk 1 by the session's prefetch).
+  let from = 0;
+  if (firstChars > 0 && starts.length > 0) {
+    const cut = firstChunkEnd(text, starts, firstChars);
+    if (cut > 0) {
+      chunks.push({ index: 0, text: text.slice(starts[0], cut), base: starts[0] });
+      from = cut;
+      while (from < text.length && WS.test(text[from])) from++;
+    }
+  }
   for (let b = 0; b < starts.length; b++) {
-    const s = starts[b];
     const e = b + 1 < starts.length ? starts[b + 1] : text.length;
+    if (e <= from) continue;
+    const s = Math.max(starts[b], from);
     for (const piece of splitOversize(text, s, e, maxChars)) units.push(piece);
   }
 
-  const chunks: SpeechChunk[] = [];
   let cs = -1;
   let ce = -1;
   const flush = () => {
@@ -230,6 +243,47 @@ export function chunkSpeech(doc: SpeechDoc, maxChars = 1000): SpeechChunk[] {
   }
   flush();
   return chunks;
+}
+
+/**
+ * End (exclusive, trimmed) of the short first chunk, or 0 when the text is already
+ * short enough to be one chunk. Prefers the sentence/block end in [target*0.4,
+ * target*1.5] closest to `target` (defaults: 80..300 for 200); otherwise the last
+ * word boundary at or before `target` (or the next one if the first word is longer).
+ */
+function firstChunkEnd(text: string, starts: number[], target: number): number {
+  const origin = starts[0];
+  const lo = origin + Math.round(target * 0.4);
+  const hi = origin + Math.round(target * 1.5);
+  const goal = origin + target;
+  let total = text.length;
+  while (total > origin && WS.test(text[total - 1])) total--;
+  if (total - origin <= hi) return 0;
+  const cands: number[] = [];
+  const re = /[.!?]["')\]”’]*(?=\s)/g;
+  re.lastIndex = origin;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) && m.index + m[0].length <= hi) cands.push(m.index + m[0].length);
+  for (const bs of starts) {
+    if (bs <= origin) continue;
+    let end = bs;
+    while (end > origin && WS.test(text[end - 1])) end--;
+    if (end <= hi) cands.push(end);
+  }
+  let best = 0;
+  for (const c of cands) {
+    if (c >= lo && c <= hi && (best === 0 || Math.abs(c - goal) < Math.abs(best - goal))) best = c;
+  }
+  if (best > 0) return best;
+  let i = goal;
+  while (i > origin && !WS.test(text[i])) i--;
+  if (i <= origin) {
+    i = goal;
+    while (i < total && !WS.test(text[i])) i++;
+    if (i >= total) return 0;
+  }
+  while (i > origin && WS.test(text[i - 1])) i--;
+  return i;
 }
 
 function splitOversize(text: string, s: number, e: number, max: number): { start: number; end: number }[] {

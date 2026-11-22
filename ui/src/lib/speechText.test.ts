@@ -103,3 +103,50 @@ describe("chunkSpeech", () => {
     expect(chunks.every((c) => !/^\w+$/.test(c.text) || c.text.length <= 50)).toBe(true);
   });
 });
+
+describe("chunkSpeech first chunk", () => {
+  const sentence = "This is a reasonably ordinary sentence of prose. ";
+  const check = (d: ReturnType<typeof extractSpeech>, chunks: ReturnType<typeof chunkSpeech>) => {
+    for (const c of chunks) expect(d.text.slice(c.base, c.base + c.text.length)).toBe(c.text);
+    chunks.forEach((c, i) => expect(c.index).toBe(i));
+    // reassembled spoken text equals the original (modulo inter-chunk whitespace)
+    expect(chunks.map((c) => c.text).join(" ").replace(/\s+/g, " ")).toBe(d.text.replace(/\s+/g, " ").trim());
+  };
+
+  it("makes chunk 1 short and ends it at a sentence", () => {
+    const d = extractSpeech(mount(`<p>${sentence.repeat(40)}</p><p>${sentence.repeat(30)}</p>`));
+    const chunks = chunkSpeech(d, 1000, 200);
+    expect(chunks[0].text.length).toBeGreaterThanOrEqual(80);
+    expect(chunks[0].text.length).toBeLessThanOrEqual(300);
+    expect(chunks[0].text.endsWith(".")).toBe(true);
+    expect(chunks[0].base).toBe(0);
+    expect(chunks[1].text.length).toBeGreaterThan(300);
+    expect(chunks[1].text.length).toBeLessThanOrEqual(1000);
+    check(d, chunks);
+  });
+
+  it("splits at a word boundary when the first sentence is over 300 chars", () => {
+    const long = "supercalifragilistic ".repeat(25).trim() + ". Next one here. " + "tail words ".repeat(50);
+    const d = extractSpeech(mount(`<p>${long}</p>`));
+    const chunks = chunkSpeech(d, 1000, 200);
+    expect(chunks[0].text.length).toBeLessThanOrEqual(200);
+    expect(chunks[0].text.length).toBeGreaterThan(150);
+    expect(chunks[0].text.endsWith("supercalifragilistic")).toBe(true); // never mid-word
+    expect(chunks[1].text.startsWith("supercalifragilistic")).toBe(true);
+    check(d, chunks);
+  });
+
+  it("leaves a short note as a single chunk", () => {
+    const d = extractSpeech(mount(`<p>Just one short paragraph.</p>`));
+    expect(chunkSpeech(d, 1000, 200)).toHaveLength(1);
+  });
+
+  it("skips a short leading heading and keeps offsets exact across blocks", () => {
+    const d = extractSpeech(mount(`<h1>Title</h1><p>${sentence.repeat(10)}</p><p>${sentence.repeat(10)}</p>`));
+    const chunks = chunkSpeech(d, 1000, 200);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks[0].text.startsWith("Title")).toBe(true);
+    check(d, chunks);
+  });
+});
+

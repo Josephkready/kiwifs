@@ -4,6 +4,8 @@ import { createSpeechHighlighter, type SpeechHighlighter } from "./speechHighlig
 import { chunkSpeech, extractSpeech } from "./speechText";
 
 export const MAX_CHUNK_CHARS = 1000;
+/** First chunk is short so playback starts after one small synth, not a ~1000-char one. */
+export const FIRST_CHUNK_CHARS = 200;
 
 export type ReadAlong = {
   session: ReadAlongSession | null;
@@ -54,7 +56,7 @@ export function useReadAlong(proseRef: RefObject<HTMLElement | null>, endpoint: 
     if (!root) return;
     stop();
     const doc = extractSpeech(root);
-    const chunks = chunkSpeech(doc, MAX_CHUNK_CHARS);
+    const chunks = chunkSpeech(doc, MAX_CHUNK_CHARS, FIRST_CHUNK_CHARS);
     if (chunks.length === 0) {
       setEmpty(true);
       return;
